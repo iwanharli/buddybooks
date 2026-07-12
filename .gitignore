@@ -4,6 +4,8 @@ backend/tmp/
 backend/build-errors.log
 backend/*.env
 !backend/.env.example
+backend/storage/originals/*
+!backend/storage/originals/.gitkeep
 
 # Node / frontend
 frontend/node_modules/

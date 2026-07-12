@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/buddybooks/backend/internal/domain/collections"
+	"github.com/buddybooks/backend/internal/domain/copies"
+	"github.com/buddybooks/backend/internal/domain/media"
 	"github.com/buddybooks/backend/internal/domain/reader"
 )
 
@@ -27,11 +29,20 @@ func NewRouter(pool *pgxpool.Pool) http.Handler {
 	})
 
 	collectionsHandler := collections.NewHandler(collections.NewRepository(pool))
-	readerHandler := reader.NewHandler()
+
+	copiesRepo := copies.NewRepository(pool)
+	copiesHandler := copies.NewHandler(copiesRepo)
+
+	mediaRepo := media.NewRepository(pool)
+	pagesRepo := reader.NewPageRepository(pool)
+	readerHandler := reader.NewHandler(pagesRepo, mediaRepo, copiesRepo)
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/collections", collectionsHandler.List)
+		api.Get("/copies", copiesHandler.List)
 		api.Post("/reader/ocr", readerHandler.RecognizePage)
+		api.Post("/copies/{copyID}/pages", readerHandler.UploadPage)
+		api.Get("/copies/{copyID}/pages", readerHandler.ListPages)
 	})
 
 	return r
