@@ -1,5 +1,7 @@
 # Go
 backend/bin/
+backend/tmp/
+backend/build-errors.log
 backend/*.env
 !backend/.env.example
 

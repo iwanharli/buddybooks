@@ -1,4 +1,4 @@
-.PHONY: run build migrate seed
+.PHONY: run dev build migrate seed
 
 # gosseract (Tesseract OCR binding) butuh header leptonica/tesseract yang
 # di-symlink Homebrew ke <prefix>/include, tapi pkg-config leptonica di
@@ -11,6 +11,10 @@ export CGO_LDFLAGS := -L$(BREW_PREFIX)/lib
 
 run:
 	go run ./cmd/api
+
+# Auto-reload: rebuild & restart otomatis saat file .go berubah (pakai air).
+dev:
+	air
 
 build:
 	go build -o bin/api ./cmd/api

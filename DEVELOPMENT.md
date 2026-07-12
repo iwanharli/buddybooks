@@ -18,16 +18,25 @@ buddybooks/
 - Go 1.22+
 - Node.js 20+
 - PostgreSQL 16+ (database `db_buddybooks` sudah dibuat dari `schema.sql` + `seed.sql`)
+- Tesseract OCR + paket bahasa (`brew install tesseract tesseract-lang`) dan `pkg-config` (`brew install pkg-config`), untuk modul reader/OCR
+- [`air`](https://github.com/air-verse/air) (`go install github.com/air-verse/air@latest`), untuk auto-reload backend saat development
 
 ## Menjalankan backend
 
 ```bash
 cd backend
 cp .env.example .env   # sesuaikan DATABASE_URL bila perlu
-make run               # atau: go run ./cmd/api
+make dev                # auto-reload (air): rebuild+restart otomatis saat file .go berubah
+# atau tanpa auto-reload:
+make run
 ```
 
 Backend berjalan di `http://localhost:8080`. Cek `GET /health`.
+
+### Auto-reload (frontend vs backend)
+
+- **Frontend (Vite)**: hot-reload otomatis bawaan, tidak perlu restart manual apa pun saat file disimpan.
+- **Backend (Go)**: `go run`/`make run` **tidak** auto-reload — perlu `make dev` (memakai `air`, dikonfigurasi di `.air.toml`) agar setiap perubahan file `.go` otomatis di-*rebuild* dan proses di-*restart*.
 
 ## Menjalankan migrasi/seed (database baru)
 
