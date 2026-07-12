@@ -32,7 +32,11 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerRef = useRef<jscanify | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // capturedFull = foto hasil jepret (utuh atau auto-crop); previewCanvas =
+  // bagian yang akan dikirim OCR (bisa dipotong ke halaman kiri/kanan).
+  const [capturedFull, setCapturedFull] = useState<HTMLCanvasElement | null>(null);
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [region, setRegion] = useState<"full" | "left" | "right">("full");
 
   const startStream = useCallback(async (deviceId?: string) => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -142,6 +146,7 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
     let img: unknown = null;
     let contour: unknown = null;
     let autoCropped = false;
+    let captured: HTMLCanvasElement = snapshot; // default: foto penuh
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,7 +167,7 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
           const height = Math.round(Math.max(dist(tl, bl), dist(tr, br)));
           const result = scanner.extractPaper(snapshot, width, height, corners);
           if (result) {
-            setPreviewCanvas(result);
+            captured = result;
             autoCropped = true;
           }
         }
@@ -176,17 +181,44 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
       (contour as any)?.delete?.();
     }
 
-    if (!autoCropped) {
-      // Fallback: pakai foto penuh apa adanya. OCR tetap jalan; pengguna
-      // bisa mengambil ulang bila ingin auto-crop yang lebih rapi.
-      setPreviewCanvas(snapshot);
-    }
+    // capturedFull = dasar yang bisa dipotong ke halaman kiri/kanan.
+    setCapturedFull(captured);
+    setRegion("full");
+    setPreviewCanvas(captured);
     setStage("preview");
-    setErrorMessage(autoCropped ? "" : "Tepi halaman tidak terdeteksi otomatis — memakai foto penuh. Anda tetap bisa memakainya, atau ambil ulang dengan latar lebih kontras.");
+    setErrorMessage(
+      autoCropped
+        ? ""
+        : "Tepi halaman tidak terdeteksi otomatis — memakai foto penuh. Jika ini foto dua halaman, pilih Halaman Kiri/Kanan di bawah."
+    );
   }, []);
+
+  // Potong capturedFull ke separuh kiri/kanan (untuk foto dua halaman) atau utuh.
+  const applyRegion = useCallback(
+    (r: "full" | "left" | "right") => {
+      if (!capturedFull) return;
+      setRegion(r);
+      if (r === "full") {
+        setPreviewCanvas(capturedFull);
+        return;
+      }
+      const w = capturedFull.width;
+      const h = capturedFull.height;
+      const halfW = Math.floor(w / 2);
+      const cropped = document.createElement("canvas");
+      cropped.width = halfW;
+      cropped.height = h;
+      const sx = r === "left" ? 0 : w - halfW;
+      cropped.getContext("2d")?.drawImage(capturedFull, sx, 0, halfW, h, 0, 0, halfW, h);
+      setPreviewCanvas(cropped);
+    },
+    [capturedFull]
+  );
 
   const retake = useCallback(() => {
     setPreviewCanvas(null);
+    setCapturedFull(null);
+    setRegion("full");
     setErrorMessage("");
     setStage("camera");
   }, []);
@@ -243,6 +275,26 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
       {stage === "preview" && previewCanvas && (
         <>
           {errorMessage && <p className="text-xs text-[var(--color-ink-soft)]">{errorMessage}</p>}
+
+          {/* Pilih bagian yang di-OCR. Untuk foto dua halaman, pilih Kiri/Kanan
+              agar hanya satu halaman diproses (mencegah teks halaman lain
+              yang miring merusak hasil). */}
+          <div className="flex gap-2">
+            {(["left", "right", "full"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => applyRegion(r)}
+                className={`flex-1 rounded-md border px-3 py-2 text-sm ${
+                  region === r
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+                    : "border-[var(--color-border)]"
+                }`}
+              >
+                {r === "left" ? "Halaman Kiri" : r === "right" ? "Halaman Kanan" : "Seluruh Foto"}
+              </button>
+            ))}
+          </div>
+
           <div className="overflow-hidden rounded-lg border border-[var(--color-border)]">
             <img src={previewCanvas.toDataURL()} alt="Hasil pindai" className="w-full" />
           </div>
