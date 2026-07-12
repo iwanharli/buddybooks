@@ -5,8 +5,6 @@ import { loadOpenCv } from "./loadOpenCv";
 
 interface DocumentScannerProps {
   onCapture: (blob: Blob) => void;
-  outputWidth?: number;
-  outputHeight?: number;
 }
 
 type Stage = "loading" | "camera" | "preview" | "error";
@@ -17,18 +15,47 @@ type Stage = "loading" | "camera" | "preview" | "error";
  * docs/reader-module.md §27.2 langkah "Pra-proses".
  *
  * Video kamera ditampilkan langsung (bukan disembunyikan) karena banyak
- * browser menghentikan decode frame pada elemen <video> yang display:none,
- * membuat videoWidth tetap 0. Deteksi tepi (jscanify) hanya dijalankan
- * sekali saat pengguna menekan "Ambil Foto", bukan tiap frame — sesuai
- * pola pemakaian resmi jscanify dan menghindari beban OpenCV di 60fps.
+ * browser menghentikan decode frame pada elemen <video> yang display:none.
+ * Deteksi tepi (jscanify) hanya dijalankan sekali saat pengguna menekan
+ * "Ambil Foto", bukan tiap frame.
+ *
+ * Menyediakan pemilihan kamera karena laptop/Mac sering mendaftarkan lebih
+ * dari satu perangkat video (mis. Continuity Camera dari iPhone terdaftar
+ * meski tidak aktif mengirim gambar, membuat feed tampak hitam).
  */
-export function DocumentScanner({ onCapture, outputWidth = 1240, outputHeight = 1754 }: DocumentScannerProps) {
+export function DocumentScanner({ onCapture }: DocumentScannerProps) {
   const [stage, setStage] = useState<Stage>("loading");
   const [errorMessage, setErrorMessage] = useState("");
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+  const [debugInfo, setDebugInfo] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerRef = useRef<jscanify | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
+
+  const startStream = useCallback(async (deviceId?: string) => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+
+    const constraints: MediaStreamConstraints = {
+      video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" },
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    streamRef.current = stream;
+
+    // Catatan: stream TIDAK dipasang ke <video> di sini karena elemen video
+    // mungkin belum ter-render (mis. saat stage masih "loading"). Pemasangan
+    // dilakukan di useEffect setelah stage="camera" agar videoRef sudah ada.
+
+    // Perbarui daftar perangkat (label baru terisi setelah izin diberikan).
+    const allDevices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs = allDevices.filter((d) => d.kind === "videoinput");
+    setDevices(videoInputs);
+
+    const activeTrack = stream.getVideoTracks()[0];
+    const activeDeviceId = activeTrack?.getSettings().deviceId;
+    if (activeDeviceId) setSelectedDeviceId(activeDeviceId);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,19 +64,8 @@ export function DocumentScanner({ onCapture, outputWidth = 1240, outputHeight = 
       .then(async () => {
         if (cancelled) return;
         scannerRef.current = new jscanify();
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-        setStage("camera");
+        await startStream();
+        if (!cancelled) setStage("camera");
       })
       .catch((err) => {
         if (!cancelled) {
@@ -62,33 +78,97 @@ export function DocumentScanner({ onCapture, outputWidth = 1240, outputHeight = 
       cancelled = true;
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Pasang stream ke elemen <video> SETELAH video ter-render (stage=camera).
+  // Ini memperbaiki kasus video 0x0/paused karena srcObject tak pernah
+  // terpasang saat stream diambil sebelum elemen video ada di DOM.
+  useEffect(() => {
+    if (stage !== "camera") return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (video && stream && video.srcObject !== stream) {
+      video.srcObject = stream;
+      video.play().catch((err) => {
+        setErrorMessage("Gagal memutar video: " + (err instanceof Error ? err.message : String(err)));
+      });
+    }
+  }, [stage, selectedDeviceId]);
+
+  // Tampilkan info debug (ukuran frame nyata) agar mudah memastikan video
+  // benar-benar menerima gambar, bukan cuma "tersambung" tapi kosong.
+  useEffect(() => {
+    if (stage !== "camera") return;
+    const interval = setInterval(() => {
+      const v = videoRef.current;
+      if (v) {
+        setDebugInfo(`${v.videoWidth}x${v.videoHeight}, readyState=${v.readyState}, paused=${v.paused}`);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [stage]);
+
+  const handleDeviceChange = useCallback(
+    async (deviceId: string) => {
+      try {
+        await startStream(deviceId);
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [startStream]
+  );
 
   const capture = useCallback(() => {
     const video = videoRef.current;
     const scanner = scannerRef.current;
     if (!video || !scanner || video.videoWidth === 0) {
-      setErrorMessage("Kamera belum siap. Tunggu sebentar lalu coba lagi.");
+      setErrorMessage("Kamera belum siap (videoWidth=0). Tunggu sebentar atau ganti kamera lalu coba lagi.");
       return;
     }
 
-    // Ambil snapshot frame video ke canvas dulu, baru diproses jscanify —
-    // OpenCV tidak bekerja langsung dengan baik pada elemen <video> hidup
-    // untuk operasi sekali-jalan seperti ini.
     const snapshot = document.createElement("canvas");
     snapshot.width = video.videoWidth;
     snapshot.height = video.videoHeight;
     snapshot.getContext("2d")?.drawImage(video, 0, 0);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cv = (window as any).cv;
+    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      Math.hypot(a.x - b.x, a.y - b.y);
+
+    let img: unknown = null;
+    let contour: unknown = null;
     try {
-      const result = scanner.extractPaper(snapshot, outputWidth, outputHeight);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      img = (cv as any).imread(snapshot);
+      contour = scanner.findPaperContour(img);
+      if (!contour) throw new Error("no-contour");
+
+      const corners = scanner.getCornerPoints(contour);
+      const { topLeftCorner: tl, topRightCorner: tr, bottomLeftCorner: bl, bottomRightCorner: br } = corners;
+      if (!tl || !tr || !bl || !br) throw new Error("incomplete-corners");
+
+      // Ukuran hasil = dimensi nyata halaman yang terdeteksi, bukan rasio
+      // A4 portrait yang dipaksakan. Ambil sisi terpanjang tiap arah agar
+      // tidak ada bagian halaman yang terpotong.
+      const width = Math.round(Math.max(dist(tl, tr), dist(bl, br)));
+      const height = Math.round(Math.max(dist(tl, bl), dist(tr, br)));
+
+      const result = scanner.extractPaper(snapshot, width, height, corners);
       setPreviewCanvas(result);
       setStage("preview");
       setErrorMessage("");
     } catch {
-      setErrorMessage("Tepi halaman belum terdeteksi. Pastikan seluruh halaman terlihat dengan latar kontras, lalu coba lagi.");
+      setErrorMessage("Tepi halaman belum terdeteksi. Pastikan seluruh halaman terlihat penuh dengan latar kontras, lalu coba lagi.");
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (img as any)?.delete?.();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (contour as any)?.delete?.();
     }
-  }, [outputWidth, outputHeight]);
+  }, []);
 
   const retake = useCallback(() => {
     setPreviewCanvas(null);
@@ -117,9 +197,23 @@ export function DocumentScanner({ onCapture, outputWidth = 1240, outputHeight = 
     <div className="space-y-3">
       {stage === "camera" && (
         <>
-          <div className="overflow-hidden rounded-lg border border-[var(--color-border)]">
+          {devices.length > 1 && (
+            <select
+              value={selectedDeviceId}
+              onChange={(e) => handleDeviceChange(e.target.value)}
+              className="w-full rounded-md border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm"
+            >
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `Kamera ${d.deviceId.slice(0, 6)}`}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-black">
             <video ref={videoRef} className="w-full" muted playsInline autoPlay />
           </div>
+          <p className="text-xs text-[var(--color-ink-soft)]">Debug: {debugInfo}</p>
           <button
             onClick={capture}
             className="flex items-center gap-2 rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:opacity-90"
