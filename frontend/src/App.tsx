@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import CollectionsPage from "./features/collections/CollectionsPage";
 import DesignKitPage from "./pages/DesignKitPage";
 import ReaderDemoPage from "./pages/ReaderDemoPage";
+import ScannerDemoPage from "./pages/ScannerDemoPage";
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -12,6 +13,7 @@ function Layout({ children }: { children: React.ReactNode }) {
         <Link to="/collections">Koleksi</Link>
         <Link to="/design-kit">Design Kit</Link>
         <Link to="/reader-demo">Reader Demo</Link>
+        <Link to="/scanner-demo">Scanner Demo</Link>
       </nav>
       <main>{children}</main>
       <Toaster
@@ -45,6 +47,7 @@ function App() {
           <Route path="/collections" element={<CollectionsPage />} />
           <Route path="/design-kit" element={<DesignKitPage />} />
           <Route path="/reader-demo" element={<ReaderDemoPage />} />
+          <Route path="/scanner-demo" element={<ScannerDemoPage />} />
         </Routes>
       </Layout>
     </BrowserRouter>

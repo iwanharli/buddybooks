@@ -19,6 +19,7 @@
     "@tanstack/react-table": "^8.21.3",
     "embla-carousel-react": "^8.6.0",
     "exceljs": "^4.4.0",
+    "jscanify": "^1.4.2",
     "lucide-react": "^1.24.0",
     "motion": "^12.42.2",
     "openseadragon": "^6.0.2",
