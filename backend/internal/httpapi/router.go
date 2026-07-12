@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/buddybooks/backend/internal/domain/collections"
+	"github.com/buddybooks/backend/internal/domain/reader"
 )
 
 func NewRouter(pool *pgxpool.Pool) http.Handler {
@@ -26,9 +27,11 @@ func NewRouter(pool *pgxpool.Pool) http.Handler {
 	})
 
 	collectionsHandler := collections.NewHandler(collections.NewRepository(pool))
+	readerHandler := reader.NewHandler()
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/collections", collectionsHandler.List)
+		api.Post("/reader/ocr", readerHandler.RecognizePage)
 	})
 
 	return r
