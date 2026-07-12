@@ -1,0 +1,13 @@
+# Go
+backend/bin/
+backend/*.env
+!backend/.env.example
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.env
+!frontend/.env.example
+
+# OS
+.DS_Store

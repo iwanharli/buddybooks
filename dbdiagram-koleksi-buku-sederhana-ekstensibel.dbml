@@ -1,0 +1,767 @@
+// =============================================================
+// Sistem Manajemen Koleksi Buku Tua, Langka, dan Bernilai
+// Desain database sederhana, modular, dan extensible.
+//
+// Konvensi:
+// - Primary key: UUID (disarankan UUIDv7 / time-ordered).
+// - Enum disimpan sebagai TEXT + CHECK constraint (lihat Note tiap kolom),
+//   bukan tipe ENUM native, agar penambahan nilai tidak mengunci tabel.
+// - Stempel waktu sistem: timestamptz.
+// - Tanggal historis tidak lengkap: date_text + year_start/year_end.
+// - Nilai uang: numeric(18,2), tidak negatif; mata uang disimpan terpisah.
+// - Konversi mata uang memakai tabel fx_rates pada tanggal transaksi.
+//
+// Catatan: dbdiagram.io tidak menegakkan CHECK; aturan validasi
+// didokumentasikan pada Note dan wajib ditegakkan di DDL/aplikasi.
+// =============================================================
+
+Project book_collection {
+  database_type: 'PostgreSQL'
+  Note: 'Skema 14 tabel inti + fx_rates. Fondasi works -> editions -> copies.'
+}
+
+// -------------------------------------------------------------
+// 0a. users (fondasi autentikasi)
+// -------------------------------------------------------------
+Table users {
+  id uuid [pk, default: `gen_random_uuid()`]
+  email text [not null, unique]
+  display_name text
+  password_hash text [note: 'Hash, bukan password polos']
+  is_active boolean [not null, default: true]
+  last_login_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 0b. user_roles (peran platform global; multi-valued per user)
+// -------------------------------------------------------------
+Table user_roles {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [not null, ref: > users.id]
+  role text [not null, note: 'CHECK: guest | buyer | seller | admin. Satu user bisa punya beberapa']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, role) [unique]
+  }
+}
+
+// -------------------------------------------------------------
+// 0c. sellers (storefront/toko; multi-tenant)
+// -------------------------------------------------------------
+Table sellers {
+  id uuid [pk, default: `gen_random_uuid()`]
+  owner_user_id uuid [not null, ref: > users.id, note: 'Pemilik utama toko']
+  shop_name text [not null]
+  shop_slug text [not null, unique, note: 'Identitas URL toko']
+  description text
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 0d. seller_members (staf toko + peran)
+// -------------------------------------------------------------
+Table seller_members {
+  id uuid [pk, default: `gen_random_uuid()`]
+  seller_id uuid [not null, ref: > sellers.id]
+  user_id uuid [not null, ref: > users.id]
+  role text [not null, note: 'CHECK: owner | manager | staff']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (seller_id, user_id) [unique, note: 'Satu peran per pengguna per toko']
+  }
+}
+
+// -------------------------------------------------------------
+// 0e. reading_entitlements (hak baca isi buku per user)
+// -------------------------------------------------------------
+Table reading_entitlements {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [not null, ref: > users.id]
+  edition_id uuid [not null, ref: > editions.id, note: 'Hak baca pada tingkat edisi']
+  source text [not null, note: 'CHECK: purchase | subscription | preview | grant']
+  order_id uuid [note: 'Sumber bila dari pembelian marketplace']
+  granted_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz [note: 'Opsional; null = permanen']
+
+  indexes {
+    (user_id, edition_id) [note: 'Cek cepat hak baca']
+  }
+}
+
+// -------------------------------------------------------------
+// 0c. audit_logs (jejak perubahan)
+// -------------------------------------------------------------
+Table audit_logs {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [ref: > users.id, note: 'Pelaku; boleh null untuk proses sistem']
+  action text [not null, note: 'CHECK: create | update | delete | restore']
+  entity_table text [not null, note: 'Nama tabel yang diubah']
+  entity_id uuid [not null]
+  changes_json jsonb [note: 'Ringkasan before/after']
+  reason text [note: 'Wajib untuk delete pada tabel bernilai']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (entity_table, entity_id)
+  }
+}
+
+// -------------------------------------------------------------
+// Master referensi lintas tabel: languages, shipping_carriers,
+// payment_methods, sales_channels. (places didefinisikan di modul reader)
+// -------------------------------------------------------------
+Table languages {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code text [not null, unique, note: 'ISO 639, mis. id, nl, jv, en, ar']
+  name text [not null]
+  native_name text
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table shipping_carriers {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code text [not null, unique]
+  name text [not null]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table payment_methods {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code text [not null, unique]
+  name text [not null]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table sales_channels {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code text [not null, unique]
+  name text [not null]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 1. collections
+// -------------------------------------------------------------
+Table collections {
+  id uuid [pk, default: `gen_random_uuid()`]
+  seller_id uuid [ref: > sellers.id, note: 'Toko pemilik koleksi; null untuk koleksi pribadi non-jual']
+  name text [not null]
+  code text [not null, unique, note: 'Kode unik, pendek, stabil']
+  description text
+  default_currency char(3) [not null, note: 'ISO 4217, mis. IDR, USD, EUR']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 2. agents (orang / organisasi)
+// -------------------------------------------------------------
+Table agents {
+  id uuid [pk, default: `gen_random_uuid()`]
+  agent_type text [not null, note: 'CHECK: person | organization']
+  authorized_name text [not null]
+  alternate_names text [note: 'Dipisah titik koma; untuk normalisasi pencarian']
+  birth_or_founding_year int
+  death_or_dissolution_year int
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 3. works (karya intelektual)
+// -------------------------------------------------------------
+Table works {
+  id uuid [pk, default: `gen_random_uuid()`]
+  work_code text [not null, unique]
+  preferred_title text [not null]
+  original_title text
+  original_language_id uuid [ref: > languages.id, note: 'Bahasa karya; master languages']
+  first_publication_year int [note: 'Boleh null; jangan isi dugaan sebagai fakta']
+  work_type_id uuid [ref: > work_types.id, note: 'Bentuk/jenis benda; master di work_types']
+  subject_summary text
+  abstract text
+  historical_significance text
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 4. work_agents (M:N work <-> agent)
+// -------------------------------------------------------------
+// Ekstensi opsional: detail halaman penulis untuk marketplace.
+// Terpisah dari agents karena hanya relevan untuk peran penulis.
+Table author_profiles {
+  id uuid [pk, default: `gen_random_uuid()`]
+  agent_id uuid [not null, unique, ref: > agents.id]
+  bio_long text
+  photo_asset_id uuid [note: 'Ref ke media_assets bila dipakai lintas modul']
+  website_url text
+  social_links jsonb [note: 'mis. {"instagram": "...", "twitter": "..."}']
+  is_featured boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table work_agents {
+  id uuid [pk, default: `gen_random_uuid()`]
+  work_id uuid [not null, ref: > works.id]
+  agent_id uuid [not null, ref: > agents.id]
+  role text [not null, note: 'CHECK: author | editor | translator | compiler | illustrator | contributor | other']
+  role_note text
+  sequence_no int [note: 'Urutan penampilan']
+
+  indexes {
+    (work_id, agent_id, role) [unique, note: 'Cegah duplikasi agent+peran pada karya yang sama']
+  }
+}
+
+// -------------------------------------------------------------
+// 3b. work_types (master bentuk/jenis benda: buku, atlas, surat, dll)
+// -------------------------------------------------------------
+Table work_types {
+  id          uuid [pk, default: `gen_random_uuid()`]
+  code        text [not null, unique, note: 'mis. book, atlas, map, letter']
+  name        text [not null, note: 'Nama tampilan, mis. Buku, Atlas, Surat']
+  description text
+  created_at  timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 4b. categories (master kategori/subjek, hierarkis) + work_categories
+// -------------------------------------------------------------
+Table categories {
+  id          uuid [pk, default: `gen_random_uuid()`]
+  parent_id   uuid [ref: > categories.id, note: 'Kategori induk; null = akar. Tidak boleh siklus']
+  name        text [not null]
+  slug        text [not null, unique, note: 'Identitas URL/filter']
+  description text
+  created_at  timestamptz [not null, default: `now()`]
+}
+
+Table work_categories {
+  id          uuid [pk, default: `gen_random_uuid()`]
+  work_id     uuid [not null, ref: > works.id]
+  category_id uuid [not null, ref: > categories.id]
+
+  indexes {
+    (work_id, category_id) [unique]
+  }
+}
+
+// -------------------------------------------------------------
+// 5. editions (versi penerbitan)
+// -------------------------------------------------------------
+Table editions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  work_id uuid [not null, ref: > works.id]
+  edition_code text [not null, unique]
+  edition_statement text
+  impression_statement text
+  issue_statement text
+  state_statement text
+  variant_statement text
+  publication_place_id uuid [ref: > places.id, note: 'Kota terbit; master places']
+  publication_country_id uuid [ref: > places.id, note: 'Negara terbit; master places']
+  publication_year int [note: 'CHECK: >= works.first_publication_year bila keduanya ada']
+  copyright_year int
+  language_id uuid [ref: > languages.id, note: 'Bahasa edisi; master languages']
+  volume_label text
+  series_title text
+  series_number text
+  isbn text
+  limited_edition boolean [default: false]
+  stated_print_run int
+  total_pages int
+  collation_summary text
+  identification_status text [note: 'CHECK: unreviewed | initial | probable | verified | disputed']
+  identification_basis text
+  preview_free_pages int [note: 'Jumlah halaman awal yang boleh dibaca gratis tanpa entitlement; 0 = tidak ada preview']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 6. edition_agents (M:N edition <-> agent)
+// -------------------------------------------------------------
+Table edition_agents {
+  id uuid [pk, default: `gen_random_uuid()`]
+  edition_id uuid [not null, ref: > editions.id]
+  agent_id uuid [not null, ref: > agents.id]
+  role text [not null, note: 'CHECK: publisher | printer | distributor | binder | other']
+  place_id uuid [ref: > places.id, note: 'Tempat; master places']
+  sequence_no int
+
+  indexes {
+    (edition_id, agent_id, role) [unique]
+  }
+}
+
+// -------------------------------------------------------------
+// 7. storage_locations (hierarki self-reference)
+// -------------------------------------------------------------
+Table storage_locations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  collection_id uuid [not null, ref: > collections.id]
+  parent_location_id uuid [ref: > storage_locations.id, note: 'Induk harus koleksi sama; tidak boleh membentuk siklus']
+  code text [not null]
+  location_type text [note: 'CHECK: building | room | cabinet | shelf | box | display_case | vault']
+  name text
+  climate_controlled boolean [default: false]
+  secure boolean [default: false]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (collection_id, code) [unique, note: 'Kode unik per koleksi']
+  }
+}
+
+// -------------------------------------------------------------
+// 8. copies (pusat inventaris - eksemplar fisik)
+// -------------------------------------------------------------
+Table copies {
+  id uuid [pk, default: `gen_random_uuid()`, note: 'ID permanen; target QR/barcode']
+  collection_id uuid [not null, ref: > collections.id]
+  edition_id uuid [not null, ref: > editions.id]
+  current_location_id uuid [ref: > storage_locations.id, note: 'Harus koleksi sama; boleh null bila sold/deaccessioned']
+  inventory_code text [not null, note: 'Unik per koleksi; label tampilan, bukan target QR']
+  accession_number text
+  barcode_value text [note: 'Disarankan unik global']
+  qr_value text
+  copy_number_statement text
+  copy_status text [not null, note: 'CHECK: owned | incoming | on_loan | under_restoration | sold | lost | deaccessioned']
+  collection_grade text [note: 'CHECK: core | important | supporting | reading | duplicate']
+  completeness_status text [note: 'CHECK: complete | incomplete | uncertain']
+  is_binding_original boolean
+  binding_description text
+  cover_description text
+  dust_jacket_present boolean
+  slipcase_present boolean
+  height_mm numeric [note: 'CHECK: > 0']
+  width_mm numeric [note: 'CHECK: > 0']
+  thickness_mm numeric [note: 'CHECK: > 0']
+  weight_grams numeric [note: 'CHECK: > 0']
+  private_notes text
+  acquired_at date
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (collection_id, inventory_code) [unique]
+  }
+}
+
+// -------------------------------------------------------------
+// 9. condition_reports (append-only, historis)
+// -------------------------------------------------------------
+Table condition_reports {
+  id uuid [pk, default: `gen_random_uuid()`]
+  copy_id uuid [not null, ref: > copies.id]
+  report_date date [not null, note: 'CHECK: tidak jauh di masa depan']
+  condition_grade text [note: 'CHECK: mint | fine | very_good | good | fair | poor']
+  condition_score numeric [note: 'CHECK: 0..100']
+  cover_note text
+  spine_note text
+  binding_note text
+  paper_note text
+  foxing boolean
+  mold_present boolean
+  pest_damage_present boolean
+  water_damage boolean
+  tears_note text
+  markings_note text
+  active_risk boolean [default: false, note: 'true memicu notifikasi']
+  handling_recommendation text
+  next_inspection_date date [note: 'CHECK: > report_date']
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 10. acquisitions (perolehan & biaya)
+// -------------------------------------------------------------
+Table acquisitions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  copy_id uuid [not null, ref: > copies.id]
+  seller_agent_id uuid [ref: > agents.id]
+  is_primary boolean [not null, default: true, note: 'Tepat satu primary per copy; sumber perhitungan total modal']
+  method text [note: 'CHECK: purchase | auction | gift | inheritance | exchange | transfer | other']
+  sales_channel_id uuid [ref: > sales_channels.id]
+  transaction_place_id uuid [ref: > places.id]
+  invoice_number text
+  transaction_date date
+  currency char(3) [note: 'Mata uang transaksi; konversi via fx_rates']
+  purchase_price numeric [note: 'CHECK: >= 0']
+  shipping_cost numeric [note: 'CHECK: >= 0']
+  tax_cost numeric [note: 'CHECK: >= 0']
+  auction_premium numeric [note: 'CHECK: >= 0']
+  restoration_initial_cost numeric [note: 'CHECK: >= 0']
+  other_cost numeric [note: 'CHECK: >= 0']
+  payment_method_id uuid [ref: > payment_methods.id]
+  proof_reference text
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (copy_id, is_primary) [note: 'Partial unique WHERE is_primary via DDL agar hanya satu primary']
+  }
+}
+
+// -------------------------------------------------------------
+// 10b. disposals (pasangan simetris acquisitions: pelepasan/penjualan)
+// -------------------------------------------------------------
+Table disposals {
+  id uuid [pk, default: `gen_random_uuid()`]
+  copy_id uuid [not null, ref: > copies.id]
+  order_item_id uuid [note: 'Sumber bila penjualan lewat marketplace; null bila off-platform']
+  buyer_agent_id uuid [ref: > agents.id, note: 'Pembeli/penerima; opsional']
+  method text [note: 'CHECK: sale | auction | gift | donation | transfer | lost | other']
+  sales_channel_id uuid [ref: > sales_channels.id, note: 'Kanal penjualan']
+  disposal_date date
+  currency char(3) [note: 'Mata uang transaksi; konversi via fx_rates']
+  asking_price numeric [note: 'CHECK: >= 0. Harga yang dipasang/target nego']
+  sale_price numeric [note: 'CHECK: >= 0. Harga jual final (kotor)']
+  platform_fee numeric [note: 'CHECK: >= 0. Potongan marketplace/lelang']
+  shipping_cost numeric [note: 'CHECK: >= 0. Ongkir yang ditanggung penjual']
+  tax_cost numeric [note: 'CHECK: >= 0']
+  other_cost numeric [note: 'CHECK: >= 0']
+  proof_reference text
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 11. valuations (append-only, historis)
+// -------------------------------------------------------------
+Table valuations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  copy_id uuid [not null, ref: > copies.id]
+  appraiser_agent_id uuid [ref: > agents.id]
+  valuation_date date [not null]
+  valuation_type text [note: 'CHECK: owner_estimate | dealer_estimate | auction_estimate | insurance_value | expert_appraisal | realized_sale']
+  currency char(3)
+  value_low numeric [note: 'CHECK: >= 0 dan <= value_mid']
+  value_mid numeric [note: 'CHECK: >= 0 dan <= value_high']
+  value_high numeric [note: 'CHECK: >= 0']
+  insured_value numeric [note: 'Boleh > estimasi pasar']
+  market_trend text [note: 'CHECK: rising | stable | falling']
+  liquidity_level text [note: 'CHECK: high | medium | low']
+  valuation_basis text
+  comparable_source text
+  valid_until date
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 12. provenance_events (kronologi kepemilikan)
+// -------------------------------------------------------------
+Table provenance_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  copy_id uuid [not null, ref: > copies.id]
+  owner_agent_id uuid [ref: > agents.id]
+  counterparty_agent_id uuid [ref: > agents.id]
+  sequence_no int [not null, note: 'Unik per copy; gunakan penomoran renggang 10,20,30']
+  event_type text [note: 'CHECK: created | owned | gifted | inherited | purchased | sold | auctioned | transferred | unknown']
+  period_text text [note: 'Tampilan tanggal parsial, mis. "1964-1978"']
+  period_start_year int [note: 'Untuk urut/filter; period_start_year <= period_end_year']
+  period_end_year int
+  place_id uuid [ref: > places.id]
+  evidence_summary text
+  verification_status text [note: 'CHECK: unverified | partially_verified | verified | disputed | rejected']
+  confidence text [note: 'CHECK: low | medium | high | expert_verified']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (copy_id, sequence_no) [unique]
+  }
+}
+
+// -------------------------------------------------------------
+// 13. media_assets (metadata file; soft-delete)
+// -------------------------------------------------------------
+Table media_assets {
+  id uuid [pk, default: `gen_random_uuid()`]
+  copy_id uuid [not null, ref: > copies.id]
+  media_type text [note: 'CHECK: cover_front | cover_back | spine | title_page | copyright_page | contents | last_page | signature | stamp | damage | receipt | certificate | other']
+  file_path text [not null, note: 'Lokasi di object storage; bukan binary di DB']
+  file_name text
+  mime_type text
+  file_size bigint
+  checksum_sha256 char(64) [note: 'Deteksi duplikat, perubahan, integritas backup']
+  caption text
+  deleted_at timestamptz [note: 'Soft-delete; berkas dipindah ke karantina']
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// 14. wishlists (buku buruan)
+// -------------------------------------------------------------
+Table wishlists {
+  id uuid [pk, default: `gen_random_uuid()`]
+  collection_id uuid [not null, ref: > collections.id]
+  work_id uuid [ref: > works.id, note: 'Opsional: tautan ke karya yang sudah ada']
+  target_title text
+  desired_edition text
+  desired_impression text
+  target_year int
+  target_publisher text
+  min_condition text [note: 'CHECK: mint | fine | very_good | good | fair | poor']
+  max_budget numeric [note: 'CHECK: >= 0']
+  currency char(3)
+  priority int [note: 'CHECK: 1..5 (1 = sangat tinggi)']
+  status text [note: 'CHECK: active | found | purchased | paused | abandoned']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// wishlist_offers: penawaran yang ditemukan untuk satu target wishlist
+// Satu wishlist dapat memiliki banyak penawaran dari toko berbeda.
+Table wishlist_offers {
+  id uuid [pk, default: `gen_random_uuid()`]
+  wishlist_id uuid [not null, ref: > wishlists.id]
+  seller_agent_id uuid [ref: > agents.id, note: 'Opsional; isi bila toko sudah jadi record agents']
+  source_name text [note: 'Nama toko bila belum jadi agent, mis. "@tokobukulawas"']
+  platform text [note: 'CHECK: instagram | tokopedia | shopee | facebook | whatsapp | website | offline | other']
+  listing_url text
+  price numeric [note: 'CHECK: >= 0']
+  currency char(3)
+  offered_condition text [note: 'CHECK: mint | fine | very_good | good | fair | poor. Grade yang diklaim penjual']
+  condition_note text [note: 'mis. "ada stempel, sampul lepas"']
+  availability text [note: 'CHECK: available | reserved | sold | expired | unknown']
+  observed_date date [note: 'Kapan penawaran ditemukan; harga olshop cepat berubah']
+  is_selected boolean [not null, default: false, note: 'Penawaran yang akhirnya dipilih untuk dibeli']
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (wishlist_id, is_selected)
+  }
+}
+
+// wishlist_offer_media: foto/screenshot listing penawaran (bisa banyak)
+Table wishlist_offer_media {
+  id uuid [pk, default: `gen_random_uuid()`]
+  wishlist_offer_id uuid [not null, ref: > wishlist_offers.id]
+  file_path text [not null, note: 'Lokasi di object storage; bukan binary di DB']
+  file_name text
+  mime_type text
+  file_size bigint
+  checksum_sha256 char(64)
+  caption text
+  deleted_at timestamptz [note: 'Soft-delete']
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// -------------------------------------------------------------
+// Ekspansi: fx_rates (kurs harian) - lihat README 22.6
+// -------------------------------------------------------------
+Table fx_rates {
+  id uuid [pk, default: `gen_random_uuid()`]
+  base_currency char(3) [not null]
+  quote_currency char(3) [not null]
+  rate_date date [not null]
+  rate numeric [not null, note: 'CHECK: > 0']
+  source text
+
+  indexes {
+    (base_currency, quote_currency, rate_date) [unique]
+  }
+}
+
+// =============================================================
+// Modul Marketplace (jual-beli) - lihat docs/marketplace.md
+// Menyambungkan listing -> order -> payment -> entitlement/disposal
+// =============================================================
+
+// listings: penawaran jual dari penjual
+Table listings {
+  id uuid [pk, default: `gen_random_uuid()`]
+  seller_id uuid [not null, ref: > sellers.id]
+  listing_type text [not null, note: 'CHECK: physical_copy | reading_access']
+  copy_id uuid [ref: > copies.id, note: 'Wajib bila physical_copy; unik saat aktif']
+  edition_id uuid [ref: > editions.id, note: 'Wajib bila reading_access']
+  title_snapshot text [note: 'Judul saat dipasang, untuk tampilan cepat']
+  price numeric [not null, note: 'CHECK: >= 0']
+  currency char(3) [not null]
+  quantity int [not null, default: 1, note: 'physical_copy selalu 1']
+  status text [not null, note: 'CHECK: draft | active | reserved | sold | withdrawn | expired']
+  published_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (seller_id, status)
+    copy_id [note: 'Cegah listing aktif ganda untuk copy fisik yang sama (partial unique via DDL)']
+  }
+}
+
+// orders: transaksi beli oleh pembeli (satu order = satu penjual)
+Table orders {
+  id uuid [pk, default: `gen_random_uuid()`]
+  buyer_user_id uuid [not null, ref: > users.id]
+  seller_id uuid [not null, ref: > sellers.id]
+  order_code text [not null, unique]
+  status text [not null, note: 'CHECK: pending | paid | fulfilled | completed | cancelled | refunded']
+  currency char(3) [not null]
+  items_subtotal numeric [note: 'CHECK: >= 0']
+  shipping_total numeric [note: 'CHECK: >= 0']
+  platform_fee numeric [note: 'CHECK: >= 0. Komisi platform']
+  grand_total numeric [note: 'CHECK: >= 0']
+  placed_at timestamptz [not null, default: `now()`]
+  completed_at timestamptz
+}
+
+// order_items: baris item dalam sebuah order
+Table order_items {
+  id uuid [pk, default: `gen_random_uuid()`]
+  order_id uuid [not null, ref: > orders.id]
+  listing_id uuid [ref: > listings.id, note: 'Sumber listing; boleh null bila listing kelak dihapus']
+  item_type text [not null, note: 'CHECK: physical_copy | reading_access']
+  copy_id uuid [ref: > copies.id]
+  edition_id uuid [ref: > editions.id]
+  title_snapshot text
+  unit_price numeric [not null, note: 'Harga snapshot saat beli']
+  quantity int [not null, default: 1]
+  line_total numeric [note: 'CHECK: >= 0']
+}
+
+// payments: pembayaran pembeli untuk sebuah order
+Table payments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  order_id uuid [not null, ref: > orders.id]
+  payment_method_id uuid [ref: > payment_methods.id]
+  provider_reference text [note: 'ID transaksi gateway']
+  amount numeric [not null, note: 'CHECK: >= 0']
+  currency char(3) [not null]
+  status text [not null, note: 'CHECK: pending | authorized | paid | failed | refunded']
+  paid_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// shipments: pengiriman item fisik
+Table shipments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  order_id uuid [not null, ref: > orders.id]
+  carrier_id uuid [ref: > shipping_carriers.id]
+  tracking_number text
+  status text [not null, note: 'CHECK: pending | shipped | in_transit | delivered | returned']
+  shipped_at timestamptz
+  delivered_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// payouts: pencairan dana ke penjual (harga - komisi)
+Table payouts {
+  id uuid [pk, default: `gen_random_uuid()`]
+  seller_id uuid [not null, ref: > sellers.id]
+  order_id uuid [ref: > orders.id]
+  gross_amount numeric [note: 'CHECK: >= 0']
+  platform_fee numeric [note: 'CHECK: >= 0']
+  net_amount numeric [note: 'CHECK: >= 0. Yang diterima penjual']
+  currency char(3) [not null]
+  status text [not null, note: 'CHECK: pending | processing | paid | failed']
+  paid_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// =============================================================
+// Modul Reader & Analisis AI (Fase Lanjutan) - lihat README 27
+// Cakupan awal: aksara Latin (Belanda, Indonesia ejaan lama).
+// Semua pemrosesan lokal/offline. Tabel terpisah dari inti.
+// =============================================================
+
+// book_pages: OCR, koreksi, dan terjemahan per halaman
+Table book_pages {
+  id uuid [pk, default: `gen_random_uuid()`]
+  copy_id uuid [not null, ref: > copies.id, note: 'Eksemplar fisik yang discan']
+  edition_id uuid [not null, ref: > editions.id, note: 'Denormalisasi untuk agregasi teks per edisi']
+  image_asset_id uuid [ref: > media_assets.id, note: 'Gambar halaman di object storage']
+  page_label text [note: 'Label cetak: "iv", "125", "plate 3"']
+  page_sequence int [not null, note: 'Urutan fisik halaman']
+  source_script text [note: 'CHECK: latin | javanese | jawi | other. Awal: latin']
+  source_language_id uuid [ref: > languages.id]
+  ocr_text text [note: 'Teks OCR mentah, disimpan apa adanya']
+  ocr_confidence numeric [note: 'CHECK: 0..1; rendah = tandai untuk koreksi manual']
+  ocr_engine text [note: 'tesseract | kraken | ...']
+  text_corrected text [note: 'Hasil koreksi manusia; tidak menimpa ocr_text']
+  text_en text [note: 'Terjemahan Inggris']
+  translation_model text [note: 'mis. nllb-200']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (copy_id, page_sequence) [unique]
+  }
+}
+
+// book_chapters: batas bab dan ringkasan
+Table book_chapters {
+  id uuid [pk, default: `gen_random_uuid()`]
+  edition_id uuid [not null, ref: > editions.id]
+  chapter_no int
+  title text
+  page_start_sequence int [note: 'Mengacu book_pages.page_sequence']
+  page_end_sequence int [note: 'CHECK: >= page_start_sequence']
+  summary_en text
+  summary_model text
+  summary_prompt_version text
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// ai_analyses: catatan generik hasil analisis AI (dapat dilacak)
+Table ai_analyses {
+  id uuid [pk, default: `gen_random_uuid()`]
+  scope_type text [not null, note: 'CHECK: page | chapter | edition | work']
+  scope_id uuid [not null, note: 'ID entitas sesuai scope_type (polymorphic)']
+  analysis_type text [not null, note: 'CHECK: summary | translation | entities | themes | toc_extract | other']
+  model text [not null, note: 'Model lokal yang dipakai']
+  prompt_version text [note: 'Untuk reproduktibilitas']
+  result_json jsonb
+  input_token_count int
+  output_token_count int
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (scope_type, scope_id, analysis_type) [note: 'Percepat pencarian analisis per entitas']
+  }
+}
+
+// places: daftar baku nama tempat (lapis otoritas)
+Table places {
+  id uuid [pk, default: `gen_random_uuid()`]
+  preferred_name text [not null, note: 'Nama baku, mis. "Surabaya"']
+  alternate_names text [note: 'Varian/ejaan lama, dipisah titik koma: "Soerabaja; Soerabaia"']
+  place_type text [note: 'city | region | country | building | other']
+  country text
+  latitude numeric
+  longitude numeric
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// book_entity_mentions: nama yang muncul di teks (lapis mentah)
+Table book_entity_mentions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  book_page_id uuid [not null, ref: > book_pages.id, note: 'Halaman tempat nama muncul']
+  edition_id uuid [not null, ref: > editions.id, note: 'Denormalisasi untuk agregasi per edisi']
+  entity_type text [not null, note: 'CHECK: person | place | organization | date | work_title | other']
+  surface_text text [not null, note: 'Bentuk persis di teks: "Soerabaja"']
+  normalized_text text [note: 'Tebakan normalisasi: "Surabaya"']
+  char_start int [note: 'Posisi awal di teks untuk highlight']
+  char_end int
+  confidence numeric [note: 'CHECK: 0..1']
+  extraction_model text
+  linked_agent_id uuid [ref: > agents.id, note: 'NULL sampai diverifikasi; untuk person/organization']
+  linked_place_id uuid [ref: > places.id, note: 'NULL sampai diverifikasi; untuk place']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (edition_id, entity_type) [note: 'Cari sebutan per edisi dan jenis']
+    normalized_text [note: 'Pencarian isi berbasis nama']
+  }
+}
