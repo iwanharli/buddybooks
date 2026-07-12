@@ -132,6 +132,7 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
     snapshot.width = video.videoWidth;
     snapshot.height = video.videoHeight;
     snapshot.getContext("2d")?.drawImage(video, 0, 0);
+    const frameArea = snapshot.width * snapshot.height;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cv = (window as any).cv;
@@ -140,38 +141,53 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
 
     let img: unknown = null;
     let contour: unknown = null;
+    let autoCropped = false;
+
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       img = (cv as any).imread(snapshot);
       contour = scanner.findPaperContour(img);
-      if (!contour) throw new Error("no-contour");
 
-      const corners = scanner.getCornerPoints(contour);
-      const { topLeftCorner: tl, topRightCorner: tr, bottomLeftCorner: bl, bottomRightCorner: br } = corners;
-      if (!tl || !tr || !bl || !br) throw new Error("incomplete-corners");
+      if (contour) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const area = (cv as any).contourArea(contour);
+        const corners = scanner.getCornerPoints(contour);
+        const { topLeftCorner: tl, topRightCorner: tr, bottomLeftCorner: bl, bottomRightCorner: br } = corners;
 
-      // Ukuran hasil = dimensi nyata halaman yang terdeteksi, bukan rasio
-      // A4 portrait yang dipaksakan. Ambil sisi terpanjang tiap arah agar
-      // tidak ada bagian halaman yang terpotong.
-      const width = Math.round(Math.max(dist(tl, tr), dist(bl, br)));
-      const height = Math.round(Math.max(dist(tl, bl), dist(tr, br)));
-
-      const result = scanner.extractPaper(snapshot, width, height, corners);
-      setPreviewCanvas(result);
-      setStage("preview");
-      setErrorMessage("");
+        // Terima hasil crop hanya bila keempat sudut lengkap DAN kontur
+        // cukup besar (>=15% frame). Bila tidak, gunakan foto penuh — deteksi
+        // sering gagal saat halaman memenuhi frame atau kontras latar rendah.
+        if (tl && tr && bl && br && area >= frameArea * 0.15) {
+          const width = Math.round(Math.max(dist(tl, tr), dist(bl, br)));
+          const height = Math.round(Math.max(dist(tl, bl), dist(tr, br)));
+          const result = scanner.extractPaper(snapshot, width, height, corners);
+          if (result) {
+            setPreviewCanvas(result);
+            autoCropped = true;
+          }
+        }
+      }
     } catch {
-      setErrorMessage("Tepi halaman belum terdeteksi. Pastikan seluruh halaman terlihat penuh dengan latar kontras, lalu coba lagi.");
+      // abaikan; jatuh ke fallback foto penuh di bawah
     } finally {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (img as any)?.delete?.();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (contour as any)?.delete?.();
     }
+
+    if (!autoCropped) {
+      // Fallback: pakai foto penuh apa adanya. OCR tetap jalan; pengguna
+      // bisa mengambil ulang bila ingin auto-crop yang lebih rapi.
+      setPreviewCanvas(snapshot);
+    }
+    setStage("preview");
+    setErrorMessage(autoCropped ? "" : "Tepi halaman tidak terdeteksi otomatis — memakai foto penuh. Anda tetap bisa memakainya, atau ambil ulang dengan latar lebih kontras.");
   }, []);
 
   const retake = useCallback(() => {
     setPreviewCanvas(null);
+    setErrorMessage("");
     setStage("camera");
   }, []);
 
@@ -226,6 +242,7 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
 
       {stage === "preview" && previewCanvas && (
         <>
+          {errorMessage && <p className="text-xs text-[var(--color-ink-soft)]">{errorMessage}</p>}
           <div className="overflow-hidden rounded-lg border border-[var(--color-border)]">
             <img src={previewCanvas.toDataURL()} alt="Hasil pindai" className="w-full" />
           </div>
