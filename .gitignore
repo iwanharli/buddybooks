@@ -1,4 +1,5 @@
 # Go
+.gocache/
 backend/bin/
 backend/tmp/
 backend/build-errors.log
@@ -18,6 +19,14 @@ ocr-service/.venv/
 ocr-service/__pycache__/
 ocr-service/**/__pycache__/
 *.pyc
+
+# Eval dataset: foto uji & hasil besar tidak di-commit; kunci jawaban (.txt)
+# dan struktur folder (.gitkeep) tetap disimpan.
+ocr-service/eval/images/**
+!ocr-service/eval/images/**/
+!ocr-service/eval/images/**/.gitkeep
+ocr-service/eval/results/**
+!ocr-service/eval/results/.gitkeep
 
 # OS
 .DS_Store
