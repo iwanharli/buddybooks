@@ -13,5 +13,11 @@ frontend/dist/
 frontend/*.env
 !frontend/.env.example
 
+# Python OCR service
+ocr-service/.venv/
+ocr-service/__pycache__/
+ocr-service/**/__pycache__/
+*.pyc
+
 # OS
 .DS_Store

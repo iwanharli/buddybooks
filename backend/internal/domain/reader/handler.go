@@ -9,7 +9,7 @@ import (
 
 	"github.com/buddybooks/backend/internal/domain/copies"
 	"github.com/buddybooks/backend/internal/domain/media"
-	"github.com/buddybooks/backend/internal/ocr"
+	"github.com/buddybooks/backend/internal/ocrclient"
 	"github.com/buddybooks/backend/internal/storage"
 )
 
@@ -17,10 +17,17 @@ type Handler struct {
 	pages   *PageRepository
 	assets  *media.Repository
 	copiesR *copies.Repository
+	ocr     *ocrclient.Client
 }
 
-func NewHandler(pages *PageRepository, assets *media.Repository, copiesR *copies.Repository) *Handler {
-	return &Handler{pages: pages, assets: assets, copiesR: copiesR}
+func NewHandler(pages *PageRepository, assets *media.Repository, copiesR *copies.Repository, ocr *ocrclient.Client) *Handler {
+	return &Handler{pages: pages, assets: assets, copiesR: copiesR, ocr: ocr}
+}
+
+// dewarpRequested membaca field form "dewarp" (true untuk halaman melengkung).
+func dewarpRequested(r *http.Request) bool {
+	v := r.FormValue("dewarp")
+	return v == "1" || v == "true" || v == "yes"
 }
 
 // RecognizePage menerima satu file gambar (multipart form, field "image")
@@ -40,12 +47,7 @@ func (h *Handler) RecognizePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	languages := []string{"ind", "nld", "eng"}
-	if l := r.FormValue("languages"); l != "" {
-		languages = splitCSV(l)
-	}
-
-	result, err := ocr.RecognizeBytes(data, languages)
+	result, err := h.ocr.Recognize(r.Context(), data, dewarpRequested(r))
 	if err != nil {
 		http.Error(w, "OCR gagal: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -81,12 +83,7 @@ func (h *Handler) UploadPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	languages := []string{"ind", "nld", "eng"}
-	if l := r.FormValue("languages"); l != "" {
-		languages = splitCSV(l)
-	}
-
-	ocrResult, err := ocr.RecognizeBytes(data, languages)
+	ocrResult, err := h.ocr.Recognize(ctx, data, dewarpRequested(r))
 	if err != nil {
 		http.Error(w, "OCR gagal: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -147,18 +144,4 @@ func (h *Handler) ListPages(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(items)
-}
-
-func splitCSV(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i <= len(s); i++ {
-		if i == len(s) || s[i] == ',' {
-			if i > start {
-				out = append(out, s[start:i])
-			}
-			start = i + 1
-		}
-	}
-	return out
 }

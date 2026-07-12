@@ -4,12 +4,18 @@ Struktur monorepo:
 
 ```text
 buddybooks/
-├── backend/     Go API (chi + pgx)
-├── frontend/    React + Vite + TypeScript
-├── schema.sql   Desain skema PostgreSQL (referensi)
-├── seed.sql     Data master/seed (referensi)
-└── docs/        Dokumentasi desain lengkap
+├── backend/      Go API (chi + pgx)
+├── frontend/     React + Vite + TypeScript
+├── ocr-service/  Service OCR Python (PaddleOCR/RapidOCR + dewarp)
+├── schema.sql    Desain skema PostgreSQL (referensi)
+├── seed.sql      Data master/seed (referensi)
+└── docs/         Dokumentasi desain lengkap
 ```
+
+Engine OCR memakai **service Python terpisah** (`ocr-service/`) berbasis
+PaddleOCR (model PP-OCR via RapidOCR/ONNXRuntime) + dewarping. Backend Go
+memanggilnya via HTTP (`OCR_SERVICE_URL`, default `http://127.0.0.1:8090`).
+Menggantikan Tesseract karena jauh lebih tahan foto HP miring/melengkung.
 
 `backend/migrations/` berisi salinan `schema.sql` dan `seed.sql` yang dieksekusi ke database. File di root tetap menjadi sumber desain yang didokumentasikan di `docs/`.
 
@@ -32,6 +38,18 @@ make run
 ```
 
 Backend berjalan di `http://localhost:8080`. Cek `GET /health`.
+
+## Menjalankan service OCR (Python)
+
+```bash
+cd ocr-service
+python3.11 -m venv .venv                 # sekali saja
+.venv/bin/pip install -r requirements.txt # sekali saja
+.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8090
+```
+
+Harus jalan sebelum fitur scan/OCR dipakai. Model PP-OCR diunduh otomatis
+saat pertama kali. Lihat `ocr-service/README.md`.
 
 ### Auto-reload (frontend vs backend)
 

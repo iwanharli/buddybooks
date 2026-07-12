@@ -1,0 +1,12 @@
+# Service OCR: PaddleOCR (model PP-OCR) via RapidOCR/ONNXRuntime + dewarping.
+# Dipasang di virtualenv Python 3.11 (paddlepaddle mentah bermasalah di arm64;
+# RapidOCR memakai model yang sama lewat ONNX, instalasinya andal).
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.27.0
+fastapi==0.139.0
+uvicorn[standard]==0.51.0
+python-multipart==0.0.32
+pillow==12.3.0
+numpy==2.4.6
+opencv-python-headless==5.0.0.93
+page-dewarp==0.3.4

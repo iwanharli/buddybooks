@@ -11,10 +11,10 @@ export interface BookPage {
   ocr_engine: string;
 }
 
-export async function uploadPage(copyId: string, blob: Blob, languages = "ind,nld,eng"): Promise<BookPage> {
+export async function uploadPage(copyId: string, blob: Blob, dewarp = false): Promise<BookPage> {
   const form = new FormData();
   form.append("image", blob, "page.png");
-  form.append("languages", languages);
+  if (dewarp) form.append("dewarp", "true");
 
   const res = await fetch(`${API_BASE_URL}/copies/${copyId}/pages`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await res.text());

@@ -20,7 +20,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	router := httpapi.NewRouter(pool)
+	router := httpapi.NewRouter(pool, cfg.OCRServiceURL)
 
 	log.Printf("buddybooks api listening on :%s (env=%s)", cfg.Port, cfg.Env)
 	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {

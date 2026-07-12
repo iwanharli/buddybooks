@@ -12,9 +12,10 @@ import (
 	"github.com/buddybooks/backend/internal/domain/copies"
 	"github.com/buddybooks/backend/internal/domain/media"
 	"github.com/buddybooks/backend/internal/domain/reader"
+	"github.com/buddybooks/backend/internal/ocrclient"
 )
 
-func NewRouter(pool *pgxpool.Pool) http.Handler {
+func NewRouter(pool *pgxpool.Pool, ocrServiceURL string) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -35,7 +36,8 @@ func NewRouter(pool *pgxpool.Pool) http.Handler {
 
 	mediaRepo := media.NewRepository(pool)
 	pagesRepo := reader.NewPageRepository(pool)
-	readerHandler := reader.NewHandler(pagesRepo, mediaRepo, copiesRepo)
+	ocrCli := ocrclient.New(ocrServiceURL)
+	readerHandler := reader.NewHandler(pagesRepo, mediaRepo, copiesRepo, ocrCli)
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/collections", collectionsHandler.List)

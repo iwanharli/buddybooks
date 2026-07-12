@@ -13,6 +13,7 @@ import { uploadPage, listPages } from "../features/reader/api";
 export default function ScanSessionPage() {
   const [selectedCopyId, setSelectedCopyId] = useState<string>("");
   const [scanning, setScanning] = useState(false);
+  const [dewarp, setDewarp] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: copiesList, isLoading: loadingCopies } = useQuery({
@@ -27,7 +28,7 @@ export default function ScanSessionPage() {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: (blob: Blob) => uploadPage(selectedCopyId, blob),
+    mutationFn: (blob: Blob) => uploadPage(selectedCopyId, blob, dewarp),
     onSuccess: (page) => {
       toast.success(`Halaman ${page.page_sequence} tersimpan (confidence ${(page.ocr_confidence * 100).toFixed(0)}%)`);
       queryClient.invalidateQueries({ queryKey: ["pages", selectedCopyId] });
@@ -91,6 +92,15 @@ export default function ScanSessionPage() {
               {pages?.length ?? 0} halaman tersimpan
             </p>
           </div>
+
+          <label className="flex items-center gap-2 text-sm text-[var(--color-ink-soft)]">
+            <input
+              type="checkbox"
+              checked={dewarp}
+              onChange={(e) => setDewarp(e.target.checked)}
+            />
+            Halaman melengkung? Aktifkan pelurusan (dewarp) — lebih lambat, untuk lengkungan berat
+          </label>
 
           {!scanning ? (
             <button
