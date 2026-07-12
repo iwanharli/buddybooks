@@ -6,6 +6,7 @@ package ocr
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/otiai10/gosseract/v2"
 )
@@ -27,7 +28,11 @@ func RecognizeFile(imagePath string, languages []string) (Result, error) {
 	if err := client.SetLanguage(languages...); err != nil {
 		return Result{}, fmt.Errorf("set language: %w", err)
 	}
-	if err := client.SetImage(imagePath); err != nil {
+	data, err := os.ReadFile(imagePath)
+	if err != nil {
+		return Result{}, fmt.Errorf("read image file: %w", err)
+	}
+	if err := client.SetImageFromBytes(preprocess(data)); err != nil {
 		return Result{}, fmt.Errorf("set image: %w", err)
 	}
 
@@ -54,7 +59,7 @@ func RecognizeBytes(imageData []byte, languages []string) (Result, error) {
 	if err := client.SetLanguage(languages...); err != nil {
 		return Result{}, fmt.Errorf("set language: %w", err)
 	}
-	if err := client.SetImageFromBytes(imageData); err != nil {
+	if err := client.SetImageFromBytes(preprocess(imageData)); err != nil {
 		return Result{}, fmt.Errorf("set image: %w", err)
 	}
 
