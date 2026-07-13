@@ -28,5 +28,16 @@ ocr-service/eval/images/**
 ocr-service/eval/results/**
 !ocr-service/eval/results/.gitkeep
 
+# Wadah 10 buku: foto (gambar) tidak di-commit; CASE.txt & kunci jawaban
+# (.gt.txt), README, dan struktur folder tetap disimpan.
+ocr-service/eval/books/**/*.jpg
+ocr-service/eval/books/**/*.jpeg
+ocr-service/eval/books/**/*.png
+ocr-service/eval/books/**/*.webp
+ocr-service/eval/books/**/*.bmp
+ocr-service/eval/books/**/*.tif
+ocr-service/eval/books/**/*.tiff
+ocr-service/eval/books/**/*.heic
+
 # OS
 .DS_Store

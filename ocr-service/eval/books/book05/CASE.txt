@@ -1,0 +1,9 @@
+# Buku 05 — deskripsi kasus
+# Isi baris di bawah dengan kasusnya, mis:
+#   dua halaman penuh
+#   halaman kanan + kiri terpotong & melengkung
+#   cahaya redup
+#   miring / perspektif
+#   ejaan lama, cetakan tua
+kasus:
+catatan:
