@@ -7,14 +7,15 @@ import (
 )
 
 type BookPage struct {
-	ID             string  `json:"id"`
-	CopyID         string  `json:"copy_id"`
-	EditionID      string  `json:"edition_id"`
-	ImageAssetID   *string `json:"image_asset_id,omitempty"`
-	PageSequence   int     `json:"page_sequence"`
-	OCRText        string  `json:"ocr_text"`
-	OCRConfidence  float64 `json:"ocr_confidence"`
-	OCREngine      string  `json:"ocr_engine"`
+	ID            string  `json:"id"`
+	CopyID        string  `json:"copy_id"`
+	EditionID     string  `json:"edition_id"`
+	ImageAssetID  *string `json:"image_asset_id,omitempty"`
+	PageLabel     *string `json:"page_label,omitempty"`
+	PageSequence  int     `json:"page_sequence"`
+	OCRText       string  `json:"ocr_text"`
+	OCRConfidence float64 `json:"ocr_confidence"`
+	OCREngine     string  `json:"ocr_engine"`
 }
 
 type PageRepository struct {
@@ -37,10 +38,10 @@ func (r *PageRepository) NextSequence(ctx context.Context, copyID string) (int, 
 
 func (r *PageRepository) Create(ctx context.Context, p BookPage) (BookPage, error) {
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO book_pages (copy_id, edition_id, image_asset_id, page_sequence, ocr_text, ocr_confidence, ocr_engine)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO book_pages (copy_id, edition_id, image_asset_id, page_label, page_sequence, ocr_text, ocr_confidence, ocr_engine)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id
-	`, p.CopyID, p.EditionID, p.ImageAssetID, p.PageSequence, p.OCRText, p.OCRConfidence, p.OCREngine).Scan(&p.ID)
+	`, p.CopyID, p.EditionID, p.ImageAssetID, p.PageLabel, p.PageSequence, p.OCRText, p.OCRConfidence, p.OCREngine).Scan(&p.ID)
 	if err != nil {
 		return BookPage{}, err
 	}
@@ -49,7 +50,7 @@ func (r *PageRepository) Create(ctx context.Context, p BookPage) (BookPage, erro
 
 func (r *PageRepository) ListByCopy(ctx context.Context, copyID string) ([]BookPage, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, copy_id, edition_id, image_asset_id, page_sequence, ocr_text, ocr_confidence, ocr_engine
+		SELECT id, copy_id, edition_id, image_asset_id, page_label, page_sequence, ocr_text, ocr_confidence, ocr_engine
 		FROM book_pages
 		WHERE copy_id = $1
 		ORDER BY page_sequence
@@ -62,7 +63,7 @@ func (r *PageRepository) ListByCopy(ctx context.Context, copyID string) ([]BookP
 	var out []BookPage
 	for rows.Next() {
 		var p BookPage
-		if err := rows.Scan(&p.ID, &p.CopyID, &p.EditionID, &p.ImageAssetID, &p.PageSequence, &p.OCRText, &p.OCRConfidence, &p.OCREngine); err != nil {
+		if err := rows.Scan(&p.ID, &p.CopyID, &p.EditionID, &p.ImageAssetID, &p.PageLabel, &p.PageSequence, &p.OCRText, &p.OCRConfidence, &p.OCREngine); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

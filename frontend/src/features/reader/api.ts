@@ -5,13 +5,20 @@ export interface BookPage {
   copy_id: string;
   edition_id: string;
   image_asset_id?: string;
+  page_label?: string;
   page_sequence: number;
   ocr_text: string;
   ocr_confidence: number;
   ocr_engine: string;
 }
 
-export async function uploadPage(copyId: string, blob: Blob, dewarp = false): Promise<BookPage> {
+// Satu foto bisa menghasilkan >1 book_page bila terdeteksi dua halaman (spread).
+export interface UploadResult {
+  layout: string; // single | single-dominant | spread
+  pages: BookPage[];
+}
+
+export async function uploadPage(copyId: string, blob: Blob, dewarp = false): Promise<UploadResult> {
   const form = new FormData();
   form.append("image", blob, "page.png");
   if (dewarp) form.append("dewarp", "true");

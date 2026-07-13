@@ -13,11 +13,23 @@ import (
 	"time"
 )
 
+// Page adalah satu halaman hasil segmentasi bentang (spread) — mis. halaman
+// kiri dan kanan dari satu foto buku, dibaca terpisah.
+type Page struct {
+	Label      string  `json:"label"`
+	Side       string  `json:"side"` // single | dominant | left | right
+	Text       string  `json:"text"`
+	Confidence float64 `json:"confidence"`
+	CharCount  int     `json:"char_count"`
+}
+
 type Result struct {
 	Text       string  `json:"text"`
 	Confidence float64 `json:"confidence"`
 	Engine     string  `json:"engine"`
 	Dewarped   bool    `json:"dewarped"`
+	Layout     string  `json:"layout"` // single | single-dominant | spread
+	Pages      []Page  `json:"pages"`
 }
 
 type Client struct {

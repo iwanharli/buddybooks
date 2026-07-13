@@ -29,8 +29,14 @@ export default function ScanSessionPage() {
 
   const uploadMutation = useMutation({
     mutationFn: (blob: Blob) => uploadPage(selectedCopyId, blob, dewarp),
-    onSuccess: (page) => {
-      toast.success(`Halaman ${page.page_sequence} tersimpan (confidence ${(page.ocr_confidence * 100).toFixed(0)}%)`);
+    onSuccess: (result) => {
+      const n = result.pages.length;
+      if (result.layout === "spread" && n > 1) {
+        toast.success(`Terdeteksi ${n} halaman (bentang) — tersimpan terpisah`);
+      } else {
+        const p = result.pages[0];
+        toast.success(`Halaman ${p.page_sequence} tersimpan (keyakinan ${(p.ocr_confidence * 100).toFixed(0)}%)`);
+      }
       queryClient.invalidateQueries({ queryKey: ["pages", selectedCopyId] });
       setScanning(false); // kembali ke daftar; tekan "Pindai Halaman Berikutnya" untuk lanjut
     },
@@ -43,15 +49,7 @@ export default function ScanSessionPage() {
   const selectedCopy = copiesList?.find((c) => c.id === selectedCopyId);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-8">
-      <div>
-        <h1 className="text-4xl">Sesi Pemindaian</h1>
-        <p className="text-[var(--color-ink-soft)]">
-          Pilih eksemplar, lalu pindai halaman satu per satu. Setiap halaman langsung
-          tersimpan dengan urutan otomatis.
-        </p>
-      </div>
-
+    <div className="space-y-6">
       <div>
         <label className="mb-1 block text-sm text-[var(--color-ink-soft)]">Eksemplar</label>
         {loadingCopies ? (
@@ -74,7 +72,7 @@ export default function ScanSessionPage() {
           </select>
         ) : (
           <p className="text-sm text-[var(--color-ink-soft)]">
-            Belum ada eksemplar. Tambahkan copy terlebih dahulu.
+            Belum ada eksemplar. Tambahkan eksemplar terlebih dahulu.
           </p>
         )}
       </div>
@@ -99,7 +97,7 @@ export default function ScanSessionPage() {
               checked={dewarp}
               onChange={(e) => setDewarp(e.target.checked)}
             />
-            Halaman melengkung? Aktifkan pelurusan (dewarp) — lebih lambat, untuk lengkungan berat
+            Halaman melengkung? Aktifkan pelurusan gambar, lebih lambat untuk lengkungan berat
           </label>
 
           {!scanning ? (
@@ -124,7 +122,8 @@ export default function ScanSessionPage() {
               {pages.map((p) => (
                 <div key={p.id} className="rounded-md border border-[var(--color-border)] p-3">
                   <p className="text-xs text-[var(--color-ink-soft)]">
-                    Halaman {p.page_sequence} — confidence {(p.ocr_confidence * 100).toFixed(0)}%
+                    Halaman {p.page_sequence}
+                    {p.page_label ? ` (${p.page_label})` : ""} — keyakinan {(p.ocr_confidence * 100).toFixed(0)}%
                   </p>
                   <p className="mt-1 text-sm">{p.ocr_text}</p>
                 </div>

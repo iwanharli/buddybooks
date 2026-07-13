@@ -114,22 +114,43 @@ func (h *Handler) UploadPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := h.pages.Create(ctx, BookPage{
-		CopyID:        copyID,
-		EditionID:     editionID,
-		ImageAssetID:  &asset.ID,
-		PageSequence:  nextSeq,
-		OCRText:       ocrResult.Text,
-		OCRConfidence: ocrResult.Confidence,
-		OCREngine:     ocrResult.Engine,
-	})
-	if err != nil {
-		http.Error(w, "gagal menyimpan book_pages: "+err.Error(), http.StatusInternalServerError)
-		return
+	// Bila foto berisi dua halaman (spread), simpan tiap halaman sebagai
+	// book_page terpisah dengan page_sequence berurutan, berbagi satu gambar.
+	// Bila hanya satu halaman (atau service lama tanpa `pages`), simpan satu.
+	pages := ocrResult.Pages
+	if len(pages) == 0 {
+		pages = []ocrclient.Page{{Text: ocrResult.Text, Confidence: ocrResult.Confidence}}
+	}
+
+	var created []BookPage
+	for i, pg := range pages {
+		var label *string
+		if pg.Label != "" && len(pages) > 1 {
+			l := pg.Label
+			label = &l
+		}
+		bp, err := h.pages.Create(ctx, BookPage{
+			CopyID:        copyID,
+			EditionID:     editionID,
+			ImageAssetID:  &asset.ID,
+			PageLabel:     label,
+			PageSequence:  nextSeq + i,
+			OCRText:       pg.Text,
+			OCRConfidence: pg.Confidence,
+			OCREngine:     ocrResult.Engine,
+		})
+		if err != nil {
+			http.Error(w, "gagal menyimpan book_pages: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		created = append(created, bp)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(page)
+	json.NewEncoder(w).Encode(map[string]any{
+		"layout": ocrResult.Layout,
+		"pages":  created,
+	})
 }
 
 func (h *Handler) ListPages(w http.ResponseWriter, r *http.Request) {
