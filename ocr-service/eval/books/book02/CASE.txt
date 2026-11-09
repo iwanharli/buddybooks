@@ -1,9 +1,3 @@
 # Buku 02 — deskripsi kasus
-# Isi baris di bawah dengan kasusnya, mis:
-#   dua halaman penuh
-#   halaman kanan + kiri terpotong & melengkung
-#   cahaya redup
-#   miring / perspektif
-#   ejaan lama, cetakan tua
-kasus:
-catatan:
+kasus: daftar isi layout kolom (judul .... nomor halaman kanan), cahaya redup, show-through, peta/diagram dengan label teks berputar (bukan blok paragraf)
+catatan: Murakami "Underground" (Inggris). Uji urutan-baca kolom & risiko spread palsu dari dua gugus-x (judul kiri, nomor kanan); halaman peta subway (IMG_2123) menguji ketahanan terhadap teks label non-linear/rotated di luar konteks paragraf biasa.

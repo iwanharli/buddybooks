@@ -19,6 +19,8 @@ ocr-service/.venv/
 ocr-service/__pycache__/
 ocr-service/**/__pycache__/
 *.pyc
+ocr-service/*.env
+!ocr-service/.env.example
 
 # Eval dataset: foto uji & hasil besar tidak di-commit; kunci jawaban (.txt)
 # dan struktur folder (.gitkeep) tetap disimpan.

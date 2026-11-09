@@ -1,0 +1,9 @@
+[GAMBAR&TEKS]
+[JUDUL] KEPUSTAKAAN DJAWA
+[PARAGRAF] Jang disebut kepustakaan Djawa, ialah segala kitab-kitab tjerita dan dongeng-dongeng jang memakai bahasa Djawa.
+[PARAGRAF] Adapun bahasa Djawa itu termasuk keluarga bahasa Austronesia, jakni bahasa-bahasa jang dipergunakan oleh segala bangsa jang asli jang bertempat tinggal di kepulauan disebelah tenggara benua Asia; batas disebelah utara ialah pulau Formosa, disebelah barat pulau Madagaskar, lantas ketimur hingga pantai barat benua Amerika Selatan. Oleh karena nama Austronesia itu tak berapa banjak dipakai orang, maka disini nama itu saja ganti dengan Indonesia.
+[PARAGRAF] Pada tahun 1884 Dr Brandes¹ dapat menerangkan, bahwa bangsa-bangsa tersebut diatas itu pada djaman dahulu sekali bahasanja satu djua; keterangan ini didasarkan atas hasil-hasil pembandingan bahasa-bahasa tersebut diatas itu².
+[PARAGRAF] Dalam tahun 1889 Dr H. Kern melakukan penjelidikan pula dalam lapangan pembandingan bahasa itu
+[FOOTNOTE] 1. Bijdrage tot de vergelijkende klankleer (proefschrift).
+[FOOTNOTE] 2. Permulaan penjelidikan sebenarnja dilakukan oleh Dr H. Kern dan Van der Tuuk; proefschrift diatas, halaman 3.
+[HALAMAN] v

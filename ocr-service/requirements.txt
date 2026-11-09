@@ -10,3 +10,8 @@ pillow==12.3.0
 numpy==2.4.6
 opencv-python-headless==5.0.0.93
 page-dewarp==0.3.4
+
+# Fallback VLM opsional (eval/run_books.py --vlm-fallback, lihat vlm_assist.py)
+google-genai==2.11.0
+python-dotenv==1.2.2
+requests==2.34.2

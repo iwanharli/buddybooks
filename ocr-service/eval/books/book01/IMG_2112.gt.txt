@@ -1,0 +1,7 @@
+[JUDUL] 1
+[JUDUL] Surat
+[PARAGRAF] WAKTU itu bulan Juni 1935. Aku kembali dari peternakanku di Amerika Selatan untuk tinggal selama enam bulan di Inggris. Saat-saat yang sulit bagi kami di sana. Seperti orang lain, kami pun ikut terkena depresi yang melanda dunia. Ada bermacam urusan yang harus kutangani di Inggris, yang rasanya hanya akan berhasil baik bila kutangani sendiri. Istriku tinggal untuk mengurus peternakan.
+[PARAGRAF] Tak perlu kukatakan bahwa satu hal yang ingin kulakukan sesampainya di Inggris adalah mengunjungi sahabat lamaku, Hercule Poirot.
+[PARAGRAF] Kutemui dia di tempat tinggalnya yang baru—salah satu bentuk flat model mutakhir di London. Aku menuduhnya (dan dia mengakui kenyataan itu) memilih gedung ini semata-mata karena penampilan dan pengaturannya yang geometris.
+[PARAGRAF] "Tapi benar, Kawan, tempat ini merupakan sebuah bangunan simetris yang paling menyenangkan. Apakah kau tidak merasakannya?"
+[HALAMAN] 9

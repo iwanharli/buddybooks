@@ -9,6 +9,41 @@ person
 organization
 ```
 
+## `agent_role`
+
+```text
+publisher
+printer
+distributor
+binder
+author
+editor
+translator
+seller
+appraiser
+previous_owner
+institution
+illustrator
+compiler
+contributor
+collector
+other
+```
+
+## `publisher_category`
+
+```text
+trade_publisher
+university_press
+academic_publisher
+religious_publisher
+media_group_publisher
+government_publisher
+historical_publisher
+printer
+other
+```
+
 ## `work_agent_role`
 
 ```text
@@ -282,4 +317,3 @@ unknown
 ```
 
 ---
-

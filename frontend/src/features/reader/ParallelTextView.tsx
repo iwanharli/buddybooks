@@ -11,7 +11,7 @@ interface ParallelTextViewProps {
 type ViewMode = "both" | "original" | "translated";
 
 /**
- * Tampilan paralel teks asli vs terjemahan Inggris, sesuai docs/reader-module.md
+ * Tampilan paralel teks asli vs terjemahan, sesuai docs/reader-module.md
  * bagian 27.3 (Tampilan baca). Pengguna dapat memilih mode tampilan.
  */
 export function ParallelTextView({
@@ -35,7 +35,7 @@ export function ParallelTextView({
                 : "border-[var(--color-border)]"
             }`}
           >
-            {m === "both" ? "Keduanya" : m === "original" ? sourceLanguageName : "Inggris"}
+            {m === "both" ? "Keduanya" : m === "original" ? sourceLanguageName : "Terjemahan"}
           </button>
         ))}
       </div>
@@ -52,7 +52,7 @@ export function ParallelTextView({
         {(mode === "both" || mode === "translated") && (
           <div className="rounded-lg border border-[var(--color-border)] p-4">
             <p className="mb-2 text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Inggris
+              Terjemahan
             </p>
             <p className="whitespace-pre-wrap leading-relaxed text-[var(--color-ink-soft)]">
               {translatedText ?? "Belum diterjemahkan"}

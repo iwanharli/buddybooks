@@ -1,0 +1,4 @@
+[GAMBAR&TEKS]
+[PARAGRAF] Agatha Christie
+[JUDUL] the abc murders
+[PARAGRAF] pembunuhan abc

@@ -1,9 +1,3 @@
 # Buku 01 — deskripsi kasus
-# Isi baris di bawah dengan kasusnya, mis:
-#   dua halaman penuh
-#   halaman kanan + kiri terpotong & melengkung
-#   cahaya redup
-#   miring / perspektif
-#   ejaan lama, cetakan tua
-kasus:
-catatan:
+kasus: font miring bergaya (italic-serif) rapat pada teks dialog, show-through tulisan halaman sebaliknya (terbalik/mirror) di area kosong, jari tangan menutupi sebagian margin, halaman melengkung ke atas
+catatan: Agatha Christie "The ABC Murders" (terjemahan Gramedia). Uji ketahanan terhadap show-through & oklusi jari pada halaman dengan banyak ruang kosong (paragraf pendek).

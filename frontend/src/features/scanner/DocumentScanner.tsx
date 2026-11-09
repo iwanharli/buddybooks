@@ -1,50 +1,92 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import jscanify from "jscanify/client";
-import { Camera, RotateCcw, Check } from "lucide-react";
-import { loadOpenCv } from "./loadOpenCv";
+import { Camera, Crop, RotateCcw, Check, ScanText, X } from "lucide-react";
+import { PerspectiveCropper } from "./PerspectiveCropper";
 
 interface DocumentScannerProps {
   onCapture: (blob: Blob) => void;
+  // processing: true selagi backend membaca teks dari foto yang sudah
+  // dikonfirmasi (upload + OCR sedang berjalan). Menampilkan overlay
+  // pemindaian di atas pratinjau & mengunci tombol supaya tidak dobel kirim.
+  processing?: boolean;
+  // confirmLabel: teks tombol konfirmasi — default "Gunakan Halaman Ini"
+  // cocok untuk alur OCR, tapi pemakaian lain (mis. foto eksemplar biasa)
+  // perlu label berbeda ("Gunakan Foto Ini").
+  confirmLabel?: string;
+  // allowManualCrop: tombol "Sesuaikan Crop" (4 titik manual) — sengaja
+  // cuma untuk galeri foto & foto sampul (dokumentasi visual, di mana
+  // crop presisi penting untuk tampilan). Alur scan isi buku (OCR) tidak
+  // butuh ini: auto-crop + fallback foto penuh sudah cukup, backend toh
+  // segmentasi ulang otomatis (segment_pages) kalau ada sisi terpotong.
+  allowManualCrop?: boolean;
+  // onCancel: kalau diisi, tahap "camera" dirender full-screen (video penuh
+  // layar + tombol jepret bulat mengambang di bawah tengah, seperti
+  // aplikasi kamera native) dengan tombol X (memanggil onCancel) untuk
+  // menutup — dipakai saat DocumentScanner dibuka sebagai alur utama
+  // (bukan cuma elemen kecil di dalam halaman). Tahap pratinjau/crop tetap
+  // ukuran normal (butuh beberapa tombol aksi, tidak cocok full-screen).
+  onCancel?: () => void;
 }
 
-type Stage = "loading" | "camera" | "preview" | "error";
+type Stage = "camera" | "preview" | "adjusting" | "error";
 
 /**
- * Pemindai dokumen di browser: deteksi tepi halaman + koreksi perspektif
- * (jscanify + OpenCV.js, lokal, tanpa server), sesuai pipeline
- * docs/reader-module.md §27.2 langkah "Pra-proses".
+ * Pemindai dokumen di browser: ambil foto halaman apa adanya (tanpa deteksi
+ * tepi otomatis — lihat catatan di bawah), lalu setiap foto langsung
+ * diproses AI di backend (gemma → fallback gemini), sesuai pipeline
+ * docs/reader-module.md §27.2.
+ *
+ * Auto-crop tepi halaman (jscanify + OpenCV.js) SENGAJA dihapus: di praktik
+ * seringkali salah deteksi (mis. malah mengunci ke motif latar/meja alih-
+ * alih tepi kertas polos), menambah jeda per-jepret tanpa manfaat pasti, dan
+ * AI VLM yang sekarang WAJIB membaca tiap foto sudah cukup toleran terhadap
+ * foto utuh berlatar. Tombol "Sesuaikan Crop" manual (PerspectiveCropper)
+ * tetap tersedia terpisah untuk kasus yang butuh crop presisi.
  *
  * Video kamera ditampilkan langsung (bukan disembunyikan) karena banyak
  * browser menghentikan decode frame pada elemen <video> yang display:none.
- * Deteksi tepi (jscanify) hanya dijalankan sekali saat pengguna menekan
- * "Ambil Foto", bukan tiap frame.
  *
  * Menyediakan pemilihan kamera karena laptop/Mac sering mendaftarkan lebih
  * dari satu perangkat video (mis. Continuity Camera dari iPhone terdaftar
  * meski tidak aktif mengirim gambar, membuat feed tampak hitam).
  */
-export function DocumentScanner({ onCapture }: DocumentScannerProps) {
-  const [stage, setStage] = useState<Stage>("loading");
+export function DocumentScanner({
+  onCapture,
+  processing = false,
+  confirmLabel = "Gunakan Halaman Ini",
+  allowManualCrop = true,
+  onCancel,
+}: DocumentScannerProps) {
+  const [stage, setStage] = useState<Stage>("camera");
   const [errorMessage, setErrorMessage] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
-  const [debugInfo, setDebugInfo] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
-  const scannerRef = useRef<jscanify | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  // capturedFull = foto hasil jepret (utuh atau auto-crop); previewCanvas =
-  // bagian yang akan dikirim OCR (bisa dipotong ke halaman kiri/kanan).
-  const [capturedFull, setCapturedFull] = useState<HTMLCanvasElement | null>(null);
+  // previewCanvas = foto hasil jepret, dikirim APA ADANYA ke backend (tanpa
+  // crop otomatis). Deteksi 1 halaman / 1 dominan (sisi lain terpotong) /
+  // bentang 2 halaman dilakukan otomatis di sana (segment_pages,
+  // ocr-service/segment.py) — tidak perlu pengguna memilih Kiri/Kanan/Penuh
+  // manual sebelum upload.
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
-  const [region, setRegion] = useState<"full" | "left" | "right">("full");
+  // rawSnapshot: foto asli, dipakai sebagai titik awal kalau pengguna buka
+  // "Sesuaikan Crop" manual.
+  const [rawSnapshot, setRawSnapshot] = useState<HTMLCanvasElement | null>(null);
 
   const startStream = useCallback(async (deviceId?: string) => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
 
-    const constraints: MediaStreamConstraints = {
-      video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" },
+    // width/height "ideal" tinggi WAJIB diminta eksplisit — tanpa ini browser
+    // (terutama mobile) sering jatuh ke resolusi default rendah (~640x480/VGA)
+    // yang membuat OCR gagal baca halaman buku penuh (huruf jadi cuma
+    // beberapa piksel). "ideal" hanya hint: browser tetap membatasi ke
+    // resolusi maksimum yang didukung kamera, tidak akan error bila kamera
+    // tak sanggup mencapainya.
+    const videoConstraints: MediaTrackConstraints = {
+      width: { ideal: 4096 },
+      height: { ideal: 4096 },
+      ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }),
     };
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
     streamRef.current = stream;
 
     // Catatan: stream TIDAK dipasang ke <video> di sini karena elemen video
@@ -64,19 +106,12 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
   useEffect(() => {
     let cancelled = false;
 
-    loadOpenCv()
-      .then(async () => {
-        if (cancelled) return;
-        scannerRef.current = new jscanify();
-        await startStream();
-        if (!cancelled) setStage("camera");
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setErrorMessage(err instanceof Error ? err.message : String(err));
-          setStage("error");
-        }
-      });
+    startStream().catch((err) => {
+      if (!cancelled) {
+        setErrorMessage(err instanceof Error ? err.message : String(err));
+        setStage("error");
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -100,18 +135,6 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
     }
   }, [stage, selectedDeviceId]);
 
-  // Tampilkan info debug (ukuran frame nyata) agar mudah memastikan video
-  // benar-benar menerima gambar, bukan cuma "tersambung" tapi kosong.
-  useEffect(() => {
-    if (stage !== "camera") return;
-    const interval = setInterval(() => {
-      const v = videoRef.current;
-      if (v) {
-        setDebugInfo(`${v.videoWidth}x${v.videoHeight}, readyState=${v.readyState}, paused=${v.paused}`);
-      }
-    }, 500);
-    return () => clearInterval(interval);
-  }, [stage]);
 
   const handleDeviceChange = useCallback(
     async (deviceId: string) => {
@@ -126,8 +149,7 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
 
   const capture = useCallback(() => {
     const video = videoRef.current;
-    const scanner = scannerRef.current;
-    if (!video || !scanner || video.videoWidth === 0) {
+    if (!video || video.videoWidth === 0) {
       setErrorMessage("Kamera belum siap (videoWidth=0). Tunggu sebentar atau ganti kamera lalu coba lagi.");
       return;
     }
@@ -136,89 +158,16 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
     snapshot.width = video.videoWidth;
     snapshot.height = video.videoHeight;
     snapshot.getContext("2d")?.drawImage(video, 0, 0);
-    const frameArea = snapshot.width * snapshot.height;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cv = (window as any).cv;
-    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-      Math.hypot(a.x - b.x, a.y - b.y);
-
-    let img: unknown = null;
-    let contour: unknown = null;
-    let autoCropped = false;
-    let captured: HTMLCanvasElement = snapshot; // default: foto penuh
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      img = (cv as any).imread(snapshot);
-      contour = scanner.findPaperContour(img);
-
-      if (contour) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const area = (cv as any).contourArea(contour);
-        const corners = scanner.getCornerPoints(contour);
-        const { topLeftCorner: tl, topRightCorner: tr, bottomLeftCorner: bl, bottomRightCorner: br } = corners;
-
-        // Terima hasil crop hanya bila keempat sudut lengkap DAN kontur
-        // cukup besar (>=15% frame). Bila tidak, gunakan foto penuh — deteksi
-        // sering gagal saat halaman memenuhi frame atau kontras latar rendah.
-        if (tl && tr && bl && br && area >= frameArea * 0.15) {
-          const width = Math.round(Math.max(dist(tl, tr), dist(bl, br)));
-          const height = Math.round(Math.max(dist(tl, bl), dist(tr, br)));
-          const result = scanner.extractPaper(snapshot, width, height, corners);
-          if (result) {
-            captured = result;
-            autoCropped = true;
-          }
-        }
-      }
-    } catch {
-      // abaikan; jatuh ke fallback foto penuh di bawah
-    } finally {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (img as any)?.delete?.();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (contour as any)?.delete?.();
-    }
-
-    // capturedFull = dasar yang bisa dipotong ke halaman kiri/kanan.
-    setCapturedFull(captured);
-    setRegion("full");
-    setPreviewCanvas(captured);
+    setPreviewCanvas(snapshot);
+    setRawSnapshot(snapshot);
     setStage("preview");
-    setErrorMessage(
-      autoCropped
-        ? ""
-        : "Tepi halaman tidak terdeteksi otomatis — memakai foto penuh. Jika ini foto dua halaman, pilih Halaman Kiri/Kanan di bawah."
-    );
+    setErrorMessage("");
   }, []);
-
-  // Potong capturedFull ke separuh kiri/kanan (untuk foto dua halaman) atau utuh.
-  const applyRegion = useCallback(
-    (r: "full" | "left" | "right") => {
-      if (!capturedFull) return;
-      setRegion(r);
-      if (r === "full") {
-        setPreviewCanvas(capturedFull);
-        return;
-      }
-      const w = capturedFull.width;
-      const h = capturedFull.height;
-      const halfW = Math.floor(w / 2);
-      const cropped = document.createElement("canvas");
-      cropped.width = halfW;
-      cropped.height = h;
-      const sx = r === "left" ? 0 : w - halfW;
-      cropped.getContext("2d")?.drawImage(capturedFull, sx, 0, halfW, h, 0, 0, halfW, h);
-      setPreviewCanvas(cropped);
-    },
-    [capturedFull]
-  );
 
   const retake = useCallback(() => {
     setPreviewCanvas(null);
-    setCapturedFull(null);
-    setRegion("full");
+    setRawSnapshot(null);
     setErrorMessage("");
     setStage("camera");
   }, []);
@@ -229,6 +178,21 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
     }, "image/png");
   }, [previewCanvas, onCapture]);
 
+  const applyManualCrop = useCallback((blob: Blob) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext("2d")?.drawImage(img, 0, 0);
+      setPreviewCanvas(canvas);
+      setStage("preview");
+      setErrorMessage("");
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(blob);
+  }, []);
+
   if (stage === "error") {
     return (
       <p role="alert" className="text-sm text-red-700">
@@ -237,8 +201,72 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
     );
   }
 
-  if (stage === "loading") {
-    return <p className="text-sm text-[var(--color-ink-soft)]">Memuat pemindai...</p>;
+  // Panduan sudut — murni visual, membantu pengguna membingkai halaman;
+  // foto tetap diambil utuh apa adanya saat "Ambil Foto" (tidak ada crop
+  // otomatis lagi).
+  const cornerGuides = (
+    <div className="pointer-events-none absolute inset-6 sm:inset-16">
+      {(
+        [
+          "top-0 left-0 border-t-2 border-l-2",
+          "top-0 right-0 border-t-2 border-r-2",
+          "bottom-0 left-0 border-b-2 border-l-2",
+          "bottom-0 right-0 border-b-2 border-r-2",
+        ] as const
+      ).map((pos) => (
+        <div key={pos} className={`absolute h-8 w-8 border-white/70 ${pos}`} />
+      ))}
+    </div>
+  );
+
+  if (stage === "camera" && onCancel) {
+    // Full-screen ala aplikasi kamera native: video penuh layar, tombol
+    // jepret bulat mengambang di bawah tengah, X untuk batal di kanan atas.
+    return (
+      <div className="fixed inset-0 z-[70] flex flex-col bg-black">
+        <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" muted playsInline autoPlay />
+        {cornerGuides}
+
+        <div className="relative z-10 flex items-center justify-between gap-2 p-4">
+          {devices.length > 1 ? (
+            <select
+              value={selectedDeviceId}
+              onChange={(e) => handleDeviceChange(e.target.value)}
+              className="rounded-md border border-white/30 bg-black/50 px-2 py-1.5 text-sm text-white"
+            >
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId} className="text-black">
+                  {d.label || `Kamera ${d.deviceId.slice(0, 6)}`}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span />
+          )}
+          <button
+            onClick={onCancel}
+            aria-label="Batal"
+            className="grid h-10 w-10 place-items-center rounded-full bg-black/50 text-white hover:bg-black/70"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {errorMessage && (
+          <p className="relative z-10 mx-4 rounded-md bg-red-500/90 px-3 py-2 text-sm text-white">{errorMessage}</p>
+        )}
+
+        <div className="relative z-10 mt-auto flex justify-center pb-10 pt-6">
+          <button
+            onClick={capture}
+            aria-label="Ambil Foto"
+            className="grid h-16 w-16 place-items-center rounded-full bg-white shadow-lg ring-4 ring-white/30 transition active:scale-95"
+          >
+            <Camera size={26} className="text-black" />
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -258,62 +286,107 @@ export function DocumentScanner({ onCapture }: DocumentScannerProps) {
               ))}
             </select>
           )}
-          <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-black">
-            <video ref={videoRef} className="w-full" muted playsInline autoPlay />
+          <div className="relative overflow-hidden rounded-xl border border-[var(--color-border)] bg-black shadow-sm">
+            <video ref={videoRef} className="aspect-[3/4] w-full object-cover" muted playsInline autoPlay />
+            {cornerGuides}
           </div>
-          <p className="text-xs text-[var(--color-ink-soft)]">Debug: {debugInfo}</p>
           <button
             onClick={capture}
-            className="flex items-center gap-2 rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:opacity-90"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:opacity-90"
           >
-            <Camera size={16} /> Ambil Foto
+            <Camera size={17} /> Ambil Foto
           </button>
-          {errorMessage && <p className="text-xs text-red-700">{errorMessage}</p>}
+          {errorMessage && (
+            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage}</p>
+          )}
         </>
       )}
 
       {stage === "preview" && previewCanvas && (
         <>
-          {errorMessage && <p className="text-xs text-[var(--color-ink-soft)]">{errorMessage}</p>}
+          {errorMessage && <p className="text-sm text-[var(--color-ink-soft)]">{errorMessage}</p>}
 
-          {/* Pilih bagian yang di-OCR. Untuk foto dua halaman, pilih Kiri/Kanan
-              agar hanya satu halaman diproses (mencegah teks halaman lain
-              yang miring merusak hasil). */}
-          <div className="flex gap-2">
-            {(["left", "right", "full"] as const).map((r) => (
-              <button
-                key={r}
-                onClick={() => applyRegion(r)}
-                className={`flex-1 rounded-md border px-3 py-2 text-sm ${
-                  region === r
-                    ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
-                    : "border-[var(--color-border)]"
-                }`}
-              >
-                {r === "left" ? "Halaman Kiri" : r === "right" ? "Halaman Kanan" : "Seluruh Foto"}
-              </button>
-            ))}
-          </div>
-
-          <div className="overflow-hidden rounded-lg border border-[var(--color-border)]">
+          <div className="relative overflow-hidden rounded-lg border border-[var(--color-border)]">
             <img src={previewCanvas.toDataURL()} alt="Hasil pindai" className="w-full" />
+            {processing && (
+              <div className="scan-overlay" role="status" aria-live="polite">
+                <div className="scan-overlay__line" />
+                <span className="scan-overlay__badge">
+                  <ScanText size={15} className="animate-pulse text-[var(--color-accent)]" />
+                  <span className="scan-shimmer-text">Membaca teks dari gambar...</span>
+                </span>
+              </div>
+            )}
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={retake}
-              className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-4 py-2 text-sm hover:bg-[var(--color-parchment-dim)]"
+              disabled={processing}
+              className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-4 py-2 text-sm hover:bg-[var(--color-parchment-dim)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RotateCcw size={16} /> Ambil Ulang
             </button>
+            {allowManualCrop && rawSnapshot && (
+              <button
+                onClick={() => setStage("adjusting")}
+                disabled={processing}
+                className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-4 py-2 text-sm hover:bg-[var(--color-parchment-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Crop size={16} /> Sesuaikan Crop
+              </button>
+            )}
             <button
               onClick={confirm}
-              className="flex items-center gap-2 rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:opacity-90"
+              disabled={processing}
+              className="flex items-center gap-2 rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Check size={16} /> Gunakan Halaman Ini
+              {processing ? (
+                <>
+                  <ScanText size={16} className="animate-pulse" /> Memproses...
+                </>
+              ) : (
+                <>
+                  <Check size={16} /> {confirmLabel}
+                </>
+              )}
             </button>
           </div>
         </>
       )}
+
+      {stage === "adjusting" && rawSnapshot && (
+        <PerspectiveCropperFromCanvas
+          canvas={rawSnapshot}
+          onConfirm={(blob) => applyManualCrop(blob)}
+          onCancel={() => setStage("preview")}
+        />
+      )}
     </div>
   );
+}
+
+// PerspectiveCropperFromCanvas: jembatan kecil karena rawSnapshot berupa
+// HTMLCanvasElement (hasil drawImage dari <video>), sedangkan
+// PerspectiveCropper menerima File/Blob (dipakai bersama alur unggah
+// berkas yang sumbernya memang File).
+function PerspectiveCropperFromCanvas({
+  canvas,
+  onConfirm,
+  onCancel,
+}: {
+  canvas: HTMLCanvasElement;
+  onConfirm: (blob: Blob) => void;
+  onCancel: () => void;
+}) {
+  const [blob, setBlob] = useState<Blob | null>(null);
+
+  useEffect(() => {
+    canvas.toBlob((b) => {
+      if (b) setBlob(b);
+    }, "image/png");
+  }, [canvas]);
+
+  if (!blob) return <p className="text-sm text-[var(--color-ink-soft)]">Memuat...</p>;
+
+  return <PerspectiveCropper file={blob} onConfirm={onConfirm} onCancel={onCancel} />;
 }

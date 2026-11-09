@@ -11,6 +11,32 @@ GET    /collections/{id}
 PATCH  /collections/{id}
 ```
 
+## Master Data
+
+Route master memakai nama resource Bahasa Inggris. Label UI boleh diterjemahkan, tetapi path tetap stabil untuk integrasi.
+
+```text
+GET    /master/agents
+GET    /master/publishers
+GET    /master/places
+GET    /master/categories
+GET    /master/work-types
+GET    /master/languages
+GET    /master/storage-locations
+GET    /master/shipping-carriers
+GET    /master/payment-methods
+GET    /master/sales-channels
+GET    /master/{resource}/{id}
+```
+
+`/master/agents` mengambil agent bertipe `person` dengan role kreator buku seperti `author`, `editor`, `translator`, `illustrator`, `compiler`, atau `contributor`.
+
+`/master/publishers` mengambil agent organisasi dengan role umum `publisher` atau `printer` dari `agent_roles`.
+
+`/master/{resource}/{id}` mengembalikan panel detail. Untuk `agents` dan `publishers`, respons mencakup section identitas, kontak/tempat, riwayat, kurasi, dan relasi katalog.
+
+Untuk pengisian data penerbit massal, gunakan command backend `import-publishers` seperti dijelaskan di `docs/publisher-import.md`. Command ini bukan API publik karena dipakai untuk kurasi data operasional.
+
 ## Works
 
 ```text
@@ -93,4 +119,3 @@ POST   /wishlists/{id}/convert-to-copy
 ```
 
 ---
-

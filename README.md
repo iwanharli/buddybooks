@@ -555,6 +555,102 @@ Modul Reader (`book_pages`, `book_chapters`, `ai_analyses`, `book_entity_mention
 
 ---
 
+## OCR & Fallback VLM (Status: terintegrasi ke endpoint produksi, async)
+
+`ocr-service/` (Python/FastAPI) menjalankan OCR lokal lewat RapidOCR/ONNXRuntime sebagai engine utama, ditambah lapisan koreksi opsional berbasis VLM (Vision-Language Model) untuk halaman yang hasil bacanya lemah. Lapisan VLM ini **bukan pengganti** RapidOCR — RapidOCR tetap jalan duluan untuk semua halaman (cepat, gratis, lokal); VLM hanya dipanggil sebagai *fallback* pada halaman yang ditandai `low_coverage` (confidence tinggi tapi teks yang terdeteksi jauh lebih sedikit dari yang seharusnya ada di halaman — indikasi under-read, bukan cuma error OCR biasa).
+
+### Tech stack
+
+| Lapisan | Komponen | Peran |
+|---|---|---|
+| OCR utama | RapidOCR (PP-OCR via ONNXRuntime) | Baca semua halaman, lokal, tanpa biaya |
+| Segmentasi bentang | `segment.py` (heuristik geometris) | Deteksi 1 halaman / 1 dominan / 2 halaman (spread) |
+| VLM fallback #1 | Gemini 2.5 Flash (Google, cloud API) | Baca ulang halaman `low_coverage`; free tier 20 req/hari |
+| VLM fallback #2 | `google/gemma-4-26b-a4b-it:free` lewat OpenRouter (cloud API) | Dipanggil otomatis kalau Gemini gagal/kena rate-limit |
+| Modul kode | `ocr-service/vlm_assist.py` | Implementasi rantai fallback + prompt |
+| Eval harness | `ocr-service/eval/run_books.py --vlm-fallback` | Ukur CER before/after pada dataset 5 buku berlabel |
+| Endpoint async | `POST /ocr/vlm-reread` (`ocr-service/app.py`) | Terima job reread, balas 202 langsung, proses di `BackgroundTasks`, callback ke Go |
+| Trigger produksi | `reader.Handler.triggerVLMReread` (`backend/internal/domain/reader/handler.go`) | Dipanggil dari `UploadPage` untuk tiap halaman `low_coverage`, fire-and-forget (goroutine) |
+| Webhook penerima | `POST /api/v1/reader/ocr/callback` (`reader.Handler.OCRWebhook`) | Update `book_pages.ocr_text`/`ocr_provider`, diverifikasi header `X-Webhook-Secret` |
+| Migrasi | `backend/migrations/0006_book_pages_vlm_fallback.sql` | Kolom `low_coverage`, `ocr_provider` di `book_pages` |
+
+Kredensial (`GEMINI_API_KEY`, `OPENROUTER_API_KEY`) disimpan di `ocr-service/.env` (di-gitignore, lihat `ocr-service/.env.example`) — **tidak** dikirim ke database atau kode yang di-commit. Shared secret webhook (`OCR_WEBHOOK_SECRET`) disimpan sama-sama di `backend/.env` dan diteruskan ke `ocr-service` per-request (bukan env terpisah di sana), lihat `backend/.env.example`.
+
+### Alur baca satu halaman
+
+```text
+Foto halaman
+ └─ RapidOCR baca teks + confidence per kotak                    [lokal, selalu jalan]
+     └─ segment_pages(): tentukan layout (single/dominant/spread)
+     └─ hitung metrik coverage → tandai low_coverage bila under-read
+
+     ┌─ low_coverage == false ────────────────────────────────────┐
+     │   teks RapidOCR dipakai apa adanya                        │
+     └─────────────────────────────────────────────────────────────┘
+
+     ┌─ low_coverage == true (opsional, hanya bila fallback aktif) ┐
+     │   vlm_assist.read_page(foto, teks_rapidocr, side):          │
+     │     1. Coba Gemini 2.5 Flash                                │
+     │        - kirim foto UTUH halaman + teks RapidOCR sbg acuan  │
+     │        - prompt minta transkripsi ulang + tag struktur      │
+     │          [JUDUL]/[PARAGRAF]/[HALAMAN]/[GAMBAR&TEKS]         │
+     │        - guard khusus: kalau halaman berupa peta/diagram    │
+     │          berlabel banyak, JANGAN transkrip tiap label kecil,│
+     │          cukup caption/legend (mencegah CER meledak akibat  │
+     │          VLM terlalu rajin membaca semua label)             │
+     │        - gagal (429/error apa pun)? lanjut ke langkah 2     │
+     │     2. Fallback: OpenRouter, model gemma-4-26b-a4b-it:free  │
+     │        - prompt & guard sama, provider beda                 │
+     │        - kalau ini juga gagal → lempar error, teks RapidOCR │
+     │          asli tetap dipakai (VLM murni upgrade, bukan       │
+     │          dependency keras)                                  │
+     │   hasil: (teks_baru, nama_provider_yang_berhasil)            │
+     └───────────────────────────────────────────────────────────────┘
+```
+
+### Alur produksi (async, lintas service)
+
+VLM fallback di produksi **tidak memblokir** response upload halaman — pengguna langsung dapat hasil RapidOCR, teks yang lebih baik menyusul belakangan begitu VLM selesai:
+
+```text
+POST /api/v1/copies/{copyID}/pages (backend Go)
+ └─ ocrclient.Recognize() → RapidOCR baca semua halaman             [sinkron]
+     └─ simpan tiap halaman ke book_pages (ocr_text, low_coverage)
+     └─ response langsung dikembalikan ke pengguna                  [selesai di sini]
+
+     ┌─ untuk tiap halaman dengan low_coverage == true ─────────────────┐
+     │   go func() triggerVLMReread(...)                    [goroutine, tidak diawait]
+     │     └─ POST ocr-service /ocr/vlm-reread (image, ocr_text, side,  │
+     │        book_page_id, callback_url, callback_secret)             │
+     │        → ocr-service balas 202 Accepted SEKETIKA                │
+     │            └─ BackgroundTasks: vlm_assist.read_page()           │
+     │               (Gemini → OpenRouter/Gemma, lihat alur di atas)   │
+     │               └─ POST balik ke callback_url:                    │
+     │                  { book_page_id, text, provider }                │
+     │                  header X-Webhook-Secret                        │
+     │                    └─ Go: OCRWebhook verifikasi secret           │
+     │                       → UPDATE book_pages SET ocr_text=...,      │
+     │                         ocr_provider=..., ocr_engine='vlm:...'   │
+     └───────────────────────────────────────────────────────────────────┘
+```
+
+Karena async, klien (frontend) perlu polling/refresh `GET /copies/{copyID}/pages` untuk melihat teks yang sudah diperbarui — belum ada push/websocket. Kegagalan di titik mana pun pada cabang VLM (Gemini & OpenRouter dua-duanya gagal, network timeout, dst.) cuma di-log di kedua sisi; `book_pages` tetap berisi hasil RapidOCR asli, tidak pernah kosong atau error ke pengguna.
+
+### Hasil eval (dataset 5 buku, 48 halaman berlabel)
+
+- CER RapidOCR-only (semua halaman): **0.229** (akurasi karakter 77,1%)
+- Pada 9 halaman `low_coverage` yang diuji fallback VLM: CER turun dari **0,312 → 0,067** (real-world, sebagian besar lewat fallback Gemma karena kuota harian Gemini habis saat pengujian)
+- Guard anti-halusinasi peta/diagram terbukti bekerja lintas provider (halaman peta subway: CER 0,723 → 0,007)
+- Alur produksi (goroutine → webhook → update DB) sudah diuji end-to-end secara nyata (bukan simulasi): halaman dengan RapidOCR gagal total (`ocr_text=""`) berhasil diisi ulang lewat fallback Gemma dan `book_pages` ter-update otomatis; callback tanpa secret yang benar ditolak (401)
+
+### Catatan & keterbatasan yang diketahui
+
+- Belum ada pola job/queue "resmi" di `backend/` — `triggerVLMReread` memakai goroutine polos (`go func`), bukan job queue persisten. Kalau proses backend restart persis saat goroutine sedang berjalan, reread itu hilang begitu saja (tidak di-retry). Cukup untuk skala saat ini; pertimbangkan queue sungguhan (mis. tabel job + worker) kalau volume upload naik jauh.
+- Free tier Gemini 20 request/hari dan ketersediaan model gratis di OpenRouter bisa berubah sewaktu-waktu (lihat catatan di [vlm_assist.py](ocr-service/vlm_assist.py)) — pantau log `[vlm-reread] gagal ...` di `ocr-service` bila fallback sering gagal total.
+- Baris "Semua pemrosesan berjalan lokal/offline" pada [Modul Reader](docs/reader-module.md) sudah direvisi untuk mencerminkan fallback VLM cloud ini.
+
+---
+
 ### Relasi Utama
 
 ### Karya ke Edisi
@@ -613,47 +709,48 @@ Lokasi dapat memiliki lokasi induk.
 |---:|---|---|---|
 | 1 | `collections` | Inti | Identitas koleksi |
 | 2 | `agents` | Inti | Orang dan organisasi |
-| 3 | `works` | Inti | Karya atau judul intelektual |
-| 4 | `work_types` | Inti | Master jenis/bentuk benda (buku, atlas, surat) |
-| 5 | `author_profiles` | Inti | Detail halaman penulis (bio, foto, sosial) |
-| 6 | `work_agents` | Inti | Relasi karya dengan kontributor |
-| 7 | `categories` | Inti | Master kategori/subjek (hierarkis) |
-| 8 | `work_categories` | Inti | Relasi karya dengan kategori |
-| 9 | `editions` | Inti | Versi penerbitan |
-| 10 | `edition_agents` | Inti | Relasi edisi dengan penerbit/percetakan |
-| 11 | `storage_locations` | Inti | Struktur ruang, lemari, rak, kotak |
-| 12 | `copies` | Inti | Eksemplar fisik yang dimiliki |
-| 13 | `condition_reports` | Inti | Riwayat pemeriksaan kondisi |
-| 14 | `acquisitions` | Inti | Riwayat perolehan dan biaya (beli) |
-| 15 | `disposals` | Inti | Riwayat pelepasan dan biaya (jual) |
-| 16 | `valuations` | Inti | Riwayat nilai dan estimasi harga |
-| 17 | `provenance_events` | Inti | Kronologi kepemilikan |
-| 18 | `media_assets` | Inti | Metadata foto dan dokumen |
-| 19 | `wishlists` | Inti | Target buku buruan |
-| 20 | `wishlist_offers` | Inti | Penawaran per target dari banyak toko |
-| 21 | `wishlist_offer_media` | Inti | Foto/screenshot penawaran |
-| 22 | `languages` | Master | Master bahasa (ISO 639) |
-| 23 | `places` | Master | Master tempat (kota/wilayah/negara) |
-| 24 | `shipping_carriers` | Master | Master kurir pengiriman |
-| 25 | `payment_methods` | Master | Master metode pembayaran |
-| 26 | `sales_channels` | Master | Master kanal transaksi |
-| 27 | `fx_rates` | Pendukung | Kurs mata uang harian |
-| 28 | `users` | Fondasi | Akun pengguna |
-| 29 | `user_roles` | Fondasi | Peran platform (buyer/seller/admin) |
-| 30 | `sellers` | Fondasi | Storefront/toko penjual |
-| 31 | `seller_members` | Fondasi | Staf toko dan peran |
-| 32 | `reading_entitlements` | Fondasi | Hak baca isi buku per pengguna |
-| 33 | `audit_logs` | Fondasi | Jejak audit perubahan |
-| 34 | `listings` | Marketplace | Penawaran jual (copy fisik / akses baca) |
-| 35 | `orders` | Marketplace | Transaksi beli |
-| 36 | `order_items` | Marketplace | Baris item dalam order |
-| 37 | `payments` | Marketplace | Pembayaran pembeli |
-| 38 | `shipments` | Marketplace | Pengiriman item fisik |
-| 39 | `payouts` | Marketplace | Pencairan dana penjual |
-| 40 | `book_pages` | Modul Reader | OCR, koreksi, terjemahan per halaman |
-| 41 | `book_chapters` | Modul Reader | Batas bab dan ringkasan |
-| 42 | `ai_analyses` | Modul Reader | Hasil analisis AI (dapat dilacak) |
-| 43 | `book_entity_mentions` | Modul Reader | Nama/tempat yang muncul di teks |
+| 3 | `agent_roles` | Inti | Role umum agent (publisher, printer, seller, dll.) |
+| 4 | `works` | Inti | Karya atau judul intelektual |
+| 5 | `work_types` | Inti | Master jenis/bentuk benda (buku, atlas, surat) |
+| 6 | `author_profiles` | Inti | Detail halaman penulis (bio, foto, sosial) |
+| 7 | `work_agents` | Inti | Relasi karya dengan kontributor |
+| 8 | `categories` | Inti | Master kategori/subjek (hierarkis) |
+| 9 | `work_categories` | Inti | Relasi karya dengan kategori |
+| 10 | `editions` | Inti | Versi penerbitan |
+| 11 | `edition_agents` | Inti | Relasi edisi dengan penerbit/percetakan |
+| 12 | `storage_locations` | Inti | Struktur ruang, lemari, rak, kotak |
+| 13 | `copies` | Inti | Eksemplar fisik yang dimiliki |
+| 14 | `condition_reports` | Inti | Riwayat pemeriksaan kondisi |
+| 15 | `acquisitions` | Inti | Riwayat perolehan dan biaya (beli) |
+| 16 | `disposals` | Inti | Riwayat pelepasan dan biaya (jual) |
+| 17 | `valuations` | Inti | Riwayat nilai dan estimasi harga |
+| 18 | `provenance_events` | Inti | Kronologi kepemilikan |
+| 19 | `media_assets` | Inti | Metadata foto dan dokumen |
+| 20 | `wishlists` | Inti | Target buku buruan |
+| 21 | `wishlist_offers` | Inti | Penawaran per target dari banyak toko |
+| 22 | `wishlist_offer_media` | Inti | Foto/screenshot penawaran |
+| 23 | `languages` | Master | Master bahasa (ISO 639) |
+| 24 | `places` | Master | Master tempat (kota/wilayah/negara) |
+| 25 | `shipping_carriers` | Master | Master kurir pengiriman |
+| 26 | `payment_methods` | Master | Master metode pembayaran |
+| 27 | `sales_channels` | Master | Master kanal transaksi |
+| 28 | `fx_rates` | Pendukung | Kurs mata uang harian |
+| 29 | `users` | Fondasi | Akun pengguna |
+| 30 | `user_roles` | Fondasi | Peran platform (buyer/seller/admin) |
+| 31 | `sellers` | Fondasi | Storefront/toko penjual |
+| 32 | `seller_members` | Fondasi | Staf toko dan peran |
+| 33 | `reading_entitlements` | Fondasi | Hak baca isi buku per pengguna |
+| 34 | `audit_logs` | Fondasi | Jejak audit perubahan |
+| 35 | `listings` | Marketplace | Penawaran jual (copy fisik / akses baca) |
+| 36 | `orders` | Marketplace | Transaksi beli |
+| 37 | `order_items` | Marketplace | Baris item dalam order |
+| 38 | `payments` | Marketplace | Pembayaran pembeli |
+| 39 | `shipments` | Marketplace | Pengiriman item fisik |
+| 40 | `payouts` | Marketplace | Pencairan dana penjual |
+| 41 | `book_pages` | Modul Reader | OCR, koreksi, terjemahan per halaman |
+| 42 | `book_chapters` | Modul Reader | Batas bab dan ringkasan |
+| 43 | `ai_analyses` | Modul Reader | Hasil analisis AI (dapat dilacak) |
+| 44 | `book_entity_mentions` | Modul Reader | Nama/tempat yang muncul di teks |
 
 ---
 
@@ -675,8 +772,32 @@ Dokumen desain terperinci dipecah ke folder `docs/`:
 - [Modul Marketplace (Jual-Beli)](docs/marketplace.md)
 - [Contoh Data & File Desain](docs/examples.md)
 - [Modul Reader dan Analisis AI](docs/reader-module.md)
+- [Impor Data Penerbit](docs/publisher-import.md)
 
 Desain skema fisik tersedia di [`dbdiagram-koleksi-buku-sederhana-ekstensibel.dbml`](dbdiagram-koleksi-buku-sederhana-ekstensibel.dbml).
+
+## Impor Penerbit
+
+Data penerbit massal dapat diimpor dari CSV ke `agents` dan `agent_roles`.
+Importer juga mengisi `publisher_category` dan menormalkan status agar batch otomatis tidak menandai semua penerbit sebagai aktif tanpa bukti operasional.
+
+```bash
+cd backend
+make import-publishers FILE=../data/templates/publishers.csv.example
+```
+
+Batch awal dari Wikidata tersedia di:
+
+```text
+data/import/publishers_wikidata_batch_001.csv
+data/import/publishers_wikidata_enrichment_002.csv
+data/import/publishers_legal_name_enrichment_003.csv
+data/import/publishers_ikapi_members_2026_05_01.csv
+```
+
+Batch IKAPI diambil dari endpoint publik anggota IKAPI per 1 Mei 2026 dan berisi 2.084 baris. Perpusnas ISBN dipakai sebagai rujukan statistik/verifikasi; endpoint publik yang ditemukan saat ini menyediakan agregat penerbit/ISBN, bukan dump daftar penerbit siap impor.
+
+Panduan field, validasi, dan sumber data ada di [docs/publisher-import.md](docs/publisher-import.md).
 
 # Kesimpulan
 
@@ -701,7 +822,7 @@ Selama tiga lapisan tersebut tidak digabung, sistem dapat dikembangkan dari kata
 - platform penjualan atau lelang;
 - dashboard investasi koleksi.
 
-Skema terdiri dari 17 tabel inti, tabel pendukung (`fx_rates`), fondasi identitas (`users`, `user_roles`, `sellers`, `seller_members`, `reading_entitlements`, `audit_logs`), modul marketplace (`listings`, `orders`, `order_items`, `payments`, `shipments`, `payouts`), dan modul reader — total 43 tabel. Fitur baru sebaiknya ditambahkan sebagai modul dan tabel terpisah, bukan dengan terus menambah kolom pada `copies`.
+Skema terdiri dari 18 tabel inti, tabel pendukung (`fx_rates`), fondasi identitas (`users`, `user_roles`, `sellers`, `seller_members`, `reading_entitlements`, `audit_logs`), modul marketplace (`listings`, `orders`, `order_items`, `payments`, `shipments`, `payouts`), dan modul reader — total 44 tabel. Fitur baru sebaiknya ditambahkan sebagai modul dan tabel terpisah, bukan dengan terus menambah kolom pada `copies`.
 
 ---
 

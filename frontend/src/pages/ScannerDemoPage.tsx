@@ -35,15 +35,7 @@ export default function ScannerDemoPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-8">
-      <div>
-        <h1 className="text-4xl">Pindai Halaman</h1>
-        <p className="text-[var(--color-ink-soft)]">
-          Ambil foto halaman, koreksi perspektif otomatis (jscanify), lalu jalankan OCR
-          (Tesseract: Indonesia + Belanda + Inggris).
-        </p>
-      </div>
-
+    <div className="space-y-6">
       <DocumentScanner onCapture={handleCapture} />
 
       {loading && <p className="text-sm text-[var(--color-ink-soft)]">Menjalankan OCR...</p>}

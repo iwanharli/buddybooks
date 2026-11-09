@@ -130,8 +130,29 @@ CREATE TABLE agents (
   agent_type                 text NOT NULL CHECK (agent_type IN ('person','organization')),
   authorized_name            text NOT NULL,
   alternate_names            text,
+  legal_name                 text,
+  brand_name                 text,
   birth_or_founding_year     int,
   death_or_dissolution_year  int,
+  website_url                text,
+  email                      text,
+  phone                      text,
+  country_id                 uuid REFERENCES places(id),
+  city_id                    uuid REFERENCES places(id),
+  address                    text,
+  historical_period          text,
+  imprint_names              text,
+  publisher_category         text CHECK (publisher_category IS NULL OR publisher_category IN
+                                ('trade_publisher','university_press','academic_publisher',
+                                 'religious_publisher','media_group_publisher','government_publisher',
+                                 'historical_publisher','printer','other')),
+  predecessor_agent_id       uuid REFERENCES agents(id),
+  successor_agent_id         uuid REFERENCES agents(id),
+  status                     text NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive','closed','unknown')),
+  source_url                 text,
+  source_note                text,
+  verified_at                timestamptz,
+  confidence_level           text CHECK (confidence_level IS NULL OR confidence_level IN ('low','medium','high')),
   notes                      text,
   created_at                 timestamptz NOT NULL DEFAULT now(),
   updated_at                 timestamptz NOT NULL DEFAULT now()
@@ -139,6 +160,20 @@ CREATE TABLE agents (
 CREATE TRIGGER trg_agents_updated BEFORE UPDATE ON agents
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE INDEX idx_agents_name_trgm ON agents USING gin (authorized_name gin_trgm_ops);
+
+CREATE TABLE agent_roles (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id    uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  role        text NOT NULL CHECK (role IN
+                ('publisher','printer','distributor','binder','author','editor','translator',
+                 'seller','appraiser','previous_owner','institution','illustrator','compiler',
+                 'contributor','collector','other')),
+  source_note text,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (agent_id, role)
+);
+CREATE INDEX idx_agent_roles_role ON agent_roles(role);
+CREATE INDEX idx_agent_roles_agent_id ON agent_roles(agent_id);
 
 CREATE TABLE work_types (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

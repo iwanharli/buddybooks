@@ -32,6 +32,20 @@ Lokasi: LOC-A-02
 
 ---
 
+## Pelaku, role, dan penerbit
+
+- Semua orang/organisasi disimpan di `agents`.
+- Peran umum agent disimpan di `agent_roles`, bukan dipecah menjadi tabel `publishers`, `printers`, atau `sellers`.
+- Satu agent boleh punya beberapa role, misalnya organisasi yang sama dapat menjadi `publisher`, `printer`, dan `seller`.
+- Menu master **Pelaku** harus menampilkan orang yang terkait isi buku, seperti penulis, editor, penerjemah, ilustrator, penyusun, dan kontributor. Organisasi penerbit tidak ditampilkan di menu ini.
+- Menu master **Penerbit** harus menampilkan agent yang memiliki role `publisher` atau `printer`.
+- Pengisian penerbit massal dilakukan melalui importer CSV agar data dari Perpusnas, IKAPI, kolofon, dan katalog perpustakaan bisa dikurasi sebelum masuk database.
+- `edition_agents.role` tetap dipakai untuk mencatat peran agent pada edisi tertentu. Jadi agent yang punya role umum `publisher` belum tentu menjadi penerbit untuk semua edisi.
+- Data penerbit/percetakan historis harus diberi `confidence_level` atau `source_note` bila belum diverifikasi penuh.
+- Penerbit wajib memiliki `publisher_category` jika ditampilkan di menu **Penerbit**. Status `active` hanya dipakai bila ada sinyal operasional kuat; bila belum jelas gunakan `unknown`, dan gunakan `closed` untuk entitas historis/bubar.
+
+---
+
 ## Validasi ukuran dan harga
 
 - Ukuran harus bernilai positif.
@@ -121,4 +135,3 @@ Sistem klasifikasi ala perpustakaan (mis. Dewey Decimal, nomor panggil) tidak di
 - Klaim tanda tangan atau kepemilikan tokoh harus dianggap belum terverifikasi sampai memiliki bukti.
 
 ---
-

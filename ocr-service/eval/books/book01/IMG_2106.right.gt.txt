@@ -1,0 +1,5 @@
+[PARAGRAF] Agatha Christie
+[JUDUL] pembunuhan abc
+[PARAGRAF] Penerbit Gramedia Pustaka Utama
+[PARAGRAF] Jakarta
+[PARAGRAF] KOMPAS GRAMEDIA

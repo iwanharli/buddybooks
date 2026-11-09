@@ -28,6 +28,10 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic"
 
 
 def normalize(t: str) -> str:
+    # buang label struktur opsional di gt.txt, mis. "[JUDUL] ", "[PARAGRAF] ",
+    # "[FOOTNOTE] ", "[HALAMAN] ", "[GAMBAR] ", "[GAMBAR&TEKS] " — bukan teks
+    # asli buku, jadi tak ikut dihitung CER.
+    t = re.sub(r"(?m)^\[[A-ZÄÖÜÇ²³&]+\]\s*", "", t)
     return re.sub(r"\s+", " ", t).strip().lower()
 
 
@@ -57,7 +61,14 @@ def read_case(book_dir: Path) -> str:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dewarp", action="store_true")
+    ap.add_argument("--vlm-fallback", action="store_true",
+                    help="Panggil Gemini untuk membaca ulang halaman low_coverage")
     args = ap.parse_args()
+
+    read_page = None
+    if args.vlm_fallback:
+        sys.path.insert(0, str(EVAL.parent))
+        from vlm_assist import read_page
 
     book_dirs = sorted(d for d in BOOKS.glob("book*") if d.is_dir())
     images_total = 0
@@ -76,6 +87,7 @@ def main():
 
     engine = RapidOCR()
     all_cers = []
+    vlm_cers = []
 
     for d in book_dirs:
         imgs = sorted(p for p in d.iterdir() if p.suffix.lower() in IMAGE_EXTS)
@@ -85,11 +97,12 @@ def main():
         print(f"\n=== {d.name}" + (f" — {case}" if case else "") + " ===")
 
         for img_path in imgs:
-            arr = np.array(Image.open(img_path).convert("RGB"))
+            pil = Image.open(img_path).convert("RGB")
+            arr = np.array(pil)
             if args.dewarp:
                 arr, _ = dewarp_image(arr)
             result, _ = engine(arr)
-            pages, layout = segment_pages(result or [], arr.shape[1])
+            pages, layout = segment_pages(result or [], arr.shape[1], arr.shape[0])
 
             print(f"  {img_path.name}  ->  {layout}, {len(pages)} halaman")
             for p in pages:
@@ -100,19 +113,44 @@ def main():
                     if cand.exists():
                         gt = cand.read_text(encoding="utf-8")
                         break
+
                 cer_str = ""
                 if gt is not None:
                     c = cer(gt, p["text"])
                     all_cers.append(c)
                     cer_str = f", CER={c:.3f}"
+
+                vlm_str = ""
+                if read_page is not None and p.get("low_coverage"):
+                    try:
+                        vlm_text, provider = read_page(pil, p["text"], side=p["side"])
+                    except Exception as e:
+                        vlm_text, provider = "", ""
+                        vlm_str = f", VLM-err={e}"
+                    if vlm_text and gt is not None:
+                        vc = cer(gt, vlm_text)
+                        vlm_cers.append((c, vc))
+                        vlm_str = f", VLM-CER={vc:.3f} ({provider})"
+
                 first = p["text"].splitlines()[0] if p["text"] else "(kosong)"
-                print(f"      [{p['side']:<8}] conf={p['confidence']:.2f}{cer_str}  {first!r}")
+                cov = f" cov={p['coverage']:.3f}" if "coverage" in p else ""
+                flag = " ⚠LOW-COV" if p.get("low_coverage") else ""
+                print(f"      [{p['side']:<8}] conf={p['confidence']:.2f}{cov}{cer_str}{flag}{vlm_str}  {first!r}")
 
     if all_cers:
         avg = sum(all_cers) / len(all_cers)
         print(f"\nRata-rata CER: {avg:.3f}  (akurasi karakter {(1-avg)*100:.1f}%) dari {len(all_cers)} halaman berlabel")
     else:
         print("\n(Tidak ada kunci jawaban .gt.txt — CER tak dihitung; hanya confidence & layout.)")
+
+    if vlm_cers:
+        before = sum(c for c, _ in vlm_cers) / len(vlm_cers)
+        after = sum(vc for _, vc in vlm_cers) / len(vlm_cers)
+        wins = sum(1 for c, vc in vlm_cers if vc < c)
+        print(f"\nVLM-fallback (Gemini) pada {len(vlm_cers)} halaman ⚠LOW-COV:")
+        print(f"  CER sebelum : {before:.3f}")
+        print(f"  CER sesudah : {after:.3f}")
+        print(f"  Menang di {wins}/{len(vlm_cers)} halaman")
 
 
 if __name__ == "__main__":

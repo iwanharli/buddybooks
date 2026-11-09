@@ -9,7 +9,7 @@ Modul ini adalah tabel terpisah dan tidak mengubah relasi inti.
 - Sumber gambar: foto kamera oleh pengguna sendiri.
 - Aksara: **Latin lebih dahulu** (Belanda, Indonesia ejaan lama seperti Van Ophuijsen).
 - Aksara Jawa, Jawi/Pegon, dan aksara non-Latin lain **ditunda ke tahap berikutnya** karena OCR lokalnya belum andal. Skema sudah menyiapkan kolom `source_script` dan `text_corrected` agar dapat menampung koreksi manual saat aksara tersebut ditambahkan.
-- Semua pemrosesan berjalan lokal/offline.
+- OCR utama (RapidOCR) berjalan lokal/offline. Halaman yang under-read (`low_coverage`) dapat opsional dibaca ulang lewat VLM cloud (Gemini/OpenRouter) sebagai fallback — lihat [tech stack & alur VLM](../README.md#ocr--fallback-vlm-status-eval-only-belum-terhubung-ke-endpoint-produksi) di README. Fallback ini baru dipakai di eval offline, belum di endpoint produksi.
 
 ## Pipeline
 

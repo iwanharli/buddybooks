@@ -31,15 +31,7 @@ export default function ReaderDemoPage() {
   const [activeChapter, setActiveChapter] = useState<Chapter>(sampleChapters[0]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-10 p-8">
-      <div>
-        <h1 className="text-4xl">Reader Demo</h1>
-        <p className="text-[var(--color-ink-soft)]">
-          Contoh gabungan: deep zoom (OpenSeadragon), highlight entitas, tampilan
-          paralel terjemahan, navigasi bab, dan efek balik halaman.
-        </p>
-      </div>
-
+    <div className="space-y-10">
       <section className="grid grid-cols-[200px_1fr] gap-6">
         <div>
           <h2 className="mb-2 text-sm uppercase text-[var(--color-ink-soft)]">Daftar Bab</h2>
@@ -55,7 +47,7 @@ export default function ReaderDemoPage() {
           </h2>
           <ParallelTextView
             originalText={sampleOriginalText}
-            translatedText="Soekarno was born in Surabaya in 1901. He later moved to Bandung to continue his education."
+            translatedText="Soekarno lahir di Surabaya pada tahun 1901. Ia kemudian pindah ke Bandung untuk melanjutkan pendidikan."
             mentions={sampleMentions}
             sourceLanguageName="Indonesia (ejaan lama)"
           />
@@ -63,12 +55,12 @@ export default function ReaderDemoPage() {
       </section>
 
       <section>
-        <h2 className="mb-2 text-lg">Deep Zoom Halaman (OpenSeadragon)</h2>
+        <h2 className="mb-2 text-lg">Zoom Detail Halaman</h2>
         <PageZoomViewer imageUrl={samplePageImages[0]} />
       </section>
 
       <section>
-        <h2 className="mb-2 text-lg">Pratinjau Balik Halaman (react-pageflip)</h2>
+        <h2 className="mb-2 text-lg">Pratinjau Balik Halaman</h2>
         <PageFlipBook pageImageUrls={samplePageImages} />
       </section>
     </div>

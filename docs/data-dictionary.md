@@ -149,9 +149,39 @@ Kolom penting:
 | `agent_type` | Jenis agent |
 | `authorized_name` | Nama baku |
 | `alternate_names` | Nama alternatif |
+| `legal_name` | Nama legal organisasi, bila berbeda dari nama tampil |
+| `brand_name` | Nama dagang/imprint yang umum dipakai |
 | `birth_or_founding_year` | Tahun lahir atau berdiri |
 | `death_or_dissolution_year` | Tahun wafat atau bubar |
+| `website_url` | Situs resmi atau rujukan web |
+| `email` | Kontak email |
+| `phone` | Kontak telepon |
+| `country_id` | Negara asal/operasi utama, relasi ke `places` |
+| `city_id` | Kota asal/operasi utama, relasi ke `places` |
+| `address` | Alamat bebas |
+| `historical_period` | Periode aktif atau konteks historis singkat |
+| `imprint_names` | Nama imprint/label terbitan terkait |
+| `publisher_category` | Kategori khusus penerbit/percetakan, jika agent berperan sebagai publisher/printer |
+| `predecessor_agent_id` | Organisasi pendahulu, bila ada |
+| `successor_agent_id` | Organisasi penerus, bila ada |
+| `status` | `active`, `inactive`, `closed`, atau `unknown` |
+| `source_url` | Sumber rujukan utama |
+| `source_note` | Catatan sumber data |
+| `verified_at` | Tanggal verifikasi data |
+| `confidence_level` | Tingkat keyakinan data: `low`, `medium`, `high` |
 | `notes` | Catatan tambahan |
+
+Nilai `publisher_category`:
+
+- `trade_publisher`: penerbit umum/komersial;
+- `university_press`: penerbit universitas;
+- `academic_publisher`: penerbit akademik/lembaga ilmiah;
+- `religious_publisher`: penerbit keagamaan atau berbasis komunitas agama;
+- `media_group_publisher`: penerbit di bawah grup media;
+- `government_publisher`: penerbit/percetakan pemerintah atau BUMN historis;
+- `historical_publisher`: penerbit historis, kolonial, atau tidak cukup relevan sebagai entitas operasional modern;
+- `printer`: percetakan yang belum tentu berperan sebagai penerbit;
+- `other`: kategori lain yang belum masuk taksonomi.
 
 Contoh:
 
@@ -163,9 +193,43 @@ agent_type: person
 
 ---
 
+## `agent_roles`
+
+Tabel ini menandai peran umum sebuah `agent`. Satu agent dapat punya banyak role, misalnya satu organisasi bisa menjadi `publisher`, `printer`, sekaligus `seller`. Menu **Penerbit** di aplikasi memakai tabel ini untuk mengambil agent dengan role `publisher` atau `printer`, bukan semua organisasi.
+
+Nilai role utama:
+
+- `publisher`;
+- `printer`;
+- `distributor`;
+- `binder`;
+- `author`;
+- `editor`;
+- `translator`;
+- `seller`;
+- `appraiser`;
+- `previous_owner`;
+- `institution`;
+- `collector`;
+- `other`.
+
+Kolom penting:
+
+| Kolom | Fungsi |
+|---|---|
+| `agent_id` | Relasi ke `agents` |
+| `role` | Peran umum agent |
+| `source_note` | Catatan sumber/asal penetapan role |
+
+Relasi ini berbeda dari `work_agents` dan `edition_agents`: `agent_roles` menjelaskan kapabilitas/identitas umum agent, sedangkan `work_agents` dan `edition_agents` menjelaskan peran agent pada karya atau edisi tertentu.
+
+Menu master **Pelaku** memakai subset `agents.agent_type = 'person'` dengan role kreator buku (`author`, `editor`, `translator`, `illustrator`, `compiler`, `contributor`). Menu **Penerbit** memakai organisasi dengan role `publisher` atau `printer`.
+
+---
+
 ## `author_profiles`
 
-Tidak ada tabel khusus untuk penulis: penulis, editor, penerjemah, dan penerbit semua disimpan sebagai `agents` dengan peran berbeda di `work_agents`. Ini menghindari duplikasi karena satu orang bisa memiliki lebih dari satu peran (mis. penulis di satu buku, penerjemah di buku lain).
+Tidak ada tabel khusus untuk penulis: penulis, editor, penerjemah, dan penerbit semua disimpan sebagai `agents`, lalu ditandai dengan `agent_roles` serta relasi spesifik di `work_agents` atau `edition_agents`. Ini menghindari duplikasi karena satu pihak bisa memiliki lebih dari satu peran.
 
 `author_profiles` adalah tabel ekstensi opsional yang menyimpan detail khusus untuk halaman penulis di marketplace, terpisah dari `agents` karena atribut ini tidak relevan untuk peran lain seperti penerbit atau percetakan.
 
@@ -779,4 +843,3 @@ Aturan:
 Menyimpan foto atau screenshot listing untuk sebuah penawaran. Satu penawaran dapat memiliki banyak foto. Berkas disimpan di object storage; database hanya menyimpan metadata dan lokasi. Penghapusan bersifat soft-delete melalui `deleted_at`.
 
 ---
-

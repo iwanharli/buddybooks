@@ -10,12 +10,14 @@ import (
 
 	"github.com/buddybooks/backend/internal/domain/collections"
 	"github.com/buddybooks/backend/internal/domain/copies"
+	"github.com/buddybooks/backend/internal/domain/locations"
+	"github.com/buddybooks/backend/internal/domain/master"
 	"github.com/buddybooks/backend/internal/domain/media"
 	"github.com/buddybooks/backend/internal/domain/reader"
 	"github.com/buddybooks/backend/internal/ocrclient"
 )
 
-func NewRouter(pool *pgxpool.Pool, ocrServiceURL string) http.Handler {
+func NewRouter(pool *pgxpool.Pool, ocrServiceURL, publicBaseURL, webhookSecret string) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -30,21 +32,58 @@ func NewRouter(pool *pgxpool.Pool, ocrServiceURL string) http.Handler {
 	})
 
 	collectionsHandler := collections.NewHandler(collections.NewRepository(pool))
+	masterHandler := master.NewHandler(master.NewRepository(pool))
+	locationsHandler := locations.NewHandler(locations.NewRepository(pool))
 
 	copiesRepo := copies.NewRepository(pool)
 	copiesHandler := copies.NewHandler(copiesRepo)
 
 	mediaRepo := media.NewRepository(pool)
+	mediaHandler := media.NewHandler(mediaRepo)
 	pagesRepo := reader.NewPageRepository(pool)
 	ocrCli := ocrclient.New(ocrServiceURL)
-	readerHandler := reader.NewHandler(pagesRepo, mediaRepo, copiesRepo, ocrCli)
+	readerHandler := reader.NewHandler(pagesRepo, mediaRepo, copiesRepo, ocrCli, publicBaseURL, webhookSecret)
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/collections", collectionsHandler.List)
+		api.Post("/collections", collectionsHandler.Create)
+		api.Get("/collections/by-code/{code}", collectionsHandler.GetByCode)
+		api.Patch("/collections/{id}", collectionsHandler.Update)
+		api.Get("/master/{resource}", masterHandler.List)
+		api.Get("/master/{resource}/{id}", masterHandler.Detail)
 		api.Get("/copies", copiesHandler.List)
+		api.Post("/copies", copiesHandler.Create)
+		api.Get("/copies/by-code/{collectionCode}/{inventoryCode}", copiesHandler.GetByCode)
+		api.Get("/copies/{copyID}", copiesHandler.Get)
+		api.Patch("/copies/{copyID}", copiesHandler.UpdateCopy)
+		api.Patch("/copies/{copyID}/collection", copiesHandler.Move)
+		api.Get("/copies/{copyID}/condition-reports", copiesHandler.ListConditionReports)
+		api.Post("/copies/{copyID}/condition-reports", copiesHandler.AddConditionReport)
+		api.Get("/copies/{copyID}/valuations", copiesHandler.ListValuations)
+		api.Post("/copies/{copyID}/valuations", copiesHandler.AddValuation)
+		api.Put("/copies/{copyID}/acquisition", copiesHandler.UpsertAcquisition)
+		api.Get("/copies/{copyID}/provenance", copiesHandler.ListProvenance)
+		api.Post("/copies/{copyID}/provenance", copiesHandler.AddProvenance)
+		api.Patch("/copies/{copyID}/location", copiesHandler.SetLocation)
+		api.Get("/collections/{collectionID}/locations", locationsHandler.List)
+		api.Post("/collections/{collectionID}/locations", locationsHandler.Create)
+		api.Patch("/locations/{locationID}", locationsHandler.Update)
+		api.Delete("/locations/{locationID}", locationsHandler.Delete)
+		api.Get("/editions", copiesHandler.ListEditions)
+		api.Patch("/editions/{editionID}", copiesHandler.UpdateEdition)
+		api.Patch("/works/{workID}/summary", copiesHandler.UpdateWorkSummary)
+		api.Get("/collections/{collectionID}/copies", copiesHandler.ListByCollection)
+		api.Get("/collections/{collectionID}/next-inventory-code", copiesHandler.NextInventoryCode)
 		api.Post("/reader/ocr", readerHandler.RecognizePage)
+		api.Post("/reader/ocr/callback", readerHandler.OCRWebhook)
 		api.Post("/copies/{copyID}/pages", readerHandler.UploadPage)
 		api.Get("/copies/{copyID}/pages", readerHandler.ListPages)
+		api.Post("/pages/{pageID}/rescan", readerHandler.RescanPage)
+		api.Post("/copies/{copyID}/photos", mediaHandler.UploadPhoto)
+		api.Get("/copies/{copyID}/photos", mediaHandler.ListPhotos)
+		api.Get("/media/{id}/file", mediaHandler.ServeFile)
+		api.Patch("/media/{id}", mediaHandler.UpdatePhoto)
+		api.Delete("/media/{id}", mediaHandler.DeletePhoto)
 	})
 
 	return r

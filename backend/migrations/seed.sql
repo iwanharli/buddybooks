@@ -35,10 +35,48 @@ VALUES ('00000000-0000-0000-0000-000000000010',
         '00000000-0000-0000-0000-000000000001', 'owner')
 ON CONFLICT (seller_id, user_id) DO NOTHING;
 
-INSERT INTO collections (id, seller_id, name, code, default_currency)
-VALUES ('00000000-0000-0000-0000-000000000020',
-        '00000000-0000-0000-0000-000000000010',
-        'Koleksi Sejarah Indonesia', 'IND-HIS', 'IDR')
+INSERT INTO collections (id, seller_id, name, code, description, default_currency)
+VALUES
+  ('00000000-0000-0000-0000-000000000020',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Sejarah Indonesia', 'IND-HIS',
+   'Buku-buku sejarah, tokoh, dan dokumen kemerdekaan.', 'IDR'),
+  ('00000000-0000-0000-0000-000000000021',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Sastra Klasik', 'SASTRA',
+   'Novel dan karya sastra Melayu/Indonesia lama.', 'IDR'),
+  ('00000000-0000-0000-0000-000000000023',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Komik', 'KOMIK',
+   'Komik lokal dan terjemahan, lama maupun cetakan baru.', 'IDR'),
+  ('00000000-0000-0000-0000-000000000024',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Novel', 'NOVEL',
+   'Novel populer di luar kategori sastra klasik.', 'IDR'),
+  ('00000000-0000-0000-0000-000000000025',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Buku Anak', 'ANAK',
+   'Buku cerita dan bacaan anak-anak.', 'IDR'),
+  ('00000000-0000-0000-0000-000000000028',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Peta & Atlas', 'PETA',
+   'Peta, atlas, dan dokumen kartografi.', 'IDR'),
+  ('00000000-0000-0000-0000-000000000029',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Agama & Religi', 'AGAMA',
+   'Kitab, tafsir, dan buku keagamaan.', 'IDR'),
+  ('00000000-0000-0000-0000-00000000002a',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Biografi', 'BIOGRAFI',
+   'Riwayat hidup dan otobiografi tokoh.', 'IDR'),
+  ('00000000-0000-0000-0000-00000000002b',
+   '00000000-0000-0000-0000-000000000010',
+   'Koleksi Referensi', 'REFERENSI',
+   'Ensiklopedia, kamus, dan buku rujukan.', 'IDR'),
+  ('00000000-0000-0000-0000-00000000002c',
+   '00000000-0000-0000-0000-000000000010',
+   'Uncategorized', 'UNCATEGORIZED',
+   'Eksemplar yang belum ditentukan masuk koleksi mana.', 'IDR')
 ON CONFLICT (code) DO NOTHING;
 
 -- -------------------------------------------------------------
@@ -193,9 +231,83 @@ WHERE NOT EXISTS (
   SELECT 1 FROM agents a WHERE a.authorized_name = v.authorized_name
 );
 
+WITH seed_publishing_agents(authorized_name) AS (
+  VALUES
+    ('Balai Pustaka'), ('Landsdrukkerij'), ('G. Kolff & Co'), ('Noordhoff-Kolff'),
+    ('G.C.T. van Dorp & Co'), ('Albrecht & Co'), ('A.C. Nix & Co'), ('Visser & Co'),
+    ('Java-Bode'), ('W. van Hoeve'), ('Martinus Nijhoff'), ('E.J. Brill'),
+    ('J.B. Wolters'), ('P. Noordhoff'), ('Kanisius'), ('Kho Bie & Co'),
+    ('Tjoei Toei Yang'), ('Sie Dhian Ho'), ('Tan Khoen Swie'), ('Hoa Siang In Kiok'),
+    ('Sin Bin'), ('Panorama'), ('Moestika'), ('Pujangga Baru'), ('Poestaka Rakjat'),
+    ('Pembangunan'), ('Bulan Bintang'), ('Ganaco'), ('Sinar Deli'),
+    ('Gramedia Pustaka Utama'), ('Kompas Gramedia'), ('Kepustakaan Populer Gramedia'),
+    ('Elex Media Komputindo'), ('Grasindo'), ('Erlangga'), ('Mizan Pustaka'),
+    ('Bentang Pustaka'), ('Gagas Media'), ('Republika Penerbit'), ('Gunung Agung'),
+    ('Djambatan'), ('Yayasan Obor Indonesia'), ('LKiS'), ('Tiga Serangkai'),
+    ('Yudhistira'), ('Grafindo Media Pratama'), ('Ar-Ruzz Media')
+)
+UPDATE agents a
+SET
+  brand_name = COALESCE(a.brand_name, a.authorized_name),
+  publisher_category = COALESCE(a.publisher_category, CASE
+    WHEN a.authorized_name IN ('Balai Pustaka', 'Landsdrukkerij') THEN 'government_publisher'
+    WHEN a.authorized_name IN ('Gramedia Pustaka Utama', 'Kompas Gramedia', 'Kepustakaan Populer Gramedia', 'Elex Media Komputindo', 'Grasindo', 'Republika Penerbit') THEN 'media_group_publisher'
+    WHEN a.authorized_name IN ('Kanisius', 'Mizan Pustaka', 'LKiS', 'Ar-Ruzz Media') THEN 'religious_publisher'
+    WHEN a.authorized_name IN ('A.C. Nix & Co', 'Albrecht & Co', 'E.J. Brill', 'G. Kolff & Co', 'G.C.T. van Dorp & Co', 'Hoa Siang In Kiok', 'J.B. Wolters', 'Java-Bode', 'Kho Bie & Co', 'Martinus Nijhoff', 'Moestika', 'Noordhoff-Kolff', 'P. Noordhoff', 'Poestaka Rakjat', 'Pujangga Baru', 'Tan Khoen Swie') THEN 'historical_publisher'
+    ELSE 'trade_publisher'
+  END),
+  status = CASE
+    WHEN a.authorized_name IN ('A.C. Nix & Co', 'Albrecht & Co', 'G. Kolff & Co', 'G.C.T. van Dorp & Co', 'Hoa Siang In Kiok', 'J.B. Wolters', 'Java-Bode', 'Kho Bie & Co', 'Landsdrukkerij', 'Moestika', 'Noordhoff-Kolff', 'P. Noordhoff', 'Poestaka Rakjat', 'Pujangga Baru', 'Tan Khoen Swie') THEN 'closed'
+    WHEN a.authorized_name IN ('Balai Pustaka', 'Kanisius', 'Gramedia Pustaka Utama', 'Kompas Gramedia', 'Kepustakaan Populer Gramedia', 'Elex Media Komputindo', 'Grasindo', 'Erlangga', 'Mizan Pustaka', 'Bentang Pustaka', 'Gagas Media', 'Republika Penerbit', 'Yayasan Obor Indonesia', 'LKiS', 'Tiga Serangkai', 'Yudhistira', 'Grafindo Media Pratama', 'Ar-Ruzz Media') THEN 'active'
+    ELSE 'unknown'
+  END,
+  source_note = COALESCE(a.source_note, 'Seed awal penerbit/percetakan untuk katalog buku Indonesia.'),
+  confidence_level = COALESCE(a.confidence_level, 'medium')
+FROM seed_publishing_agents s
+WHERE a.authorized_name = s.authorized_name;
+
+WITH seed_publishing_agents(authorized_name) AS (
+  VALUES
+    ('Balai Pustaka'), ('Landsdrukkerij'), ('G. Kolff & Co'), ('Noordhoff-Kolff'),
+    ('G.C.T. van Dorp & Co'), ('Albrecht & Co'), ('A.C. Nix & Co'), ('Visser & Co'),
+    ('Java-Bode'), ('W. van Hoeve'), ('Martinus Nijhoff'), ('E.J. Brill'),
+    ('J.B. Wolters'), ('P. Noordhoff'), ('Kanisius'), ('Kho Bie & Co'),
+    ('Tjoei Toei Yang'), ('Sie Dhian Ho'), ('Tan Khoen Swie'), ('Hoa Siang In Kiok'),
+    ('Sin Bin'), ('Panorama'), ('Moestika'), ('Pujangga Baru'), ('Poestaka Rakjat'),
+    ('Pembangunan'), ('Bulan Bintang'), ('Ganaco'), ('Sinar Deli'),
+    ('Gramedia Pustaka Utama'), ('Kompas Gramedia'), ('Kepustakaan Populer Gramedia'),
+    ('Elex Media Komputindo'), ('Grasindo'), ('Erlangga'), ('Mizan Pustaka'),
+    ('Bentang Pustaka'), ('Gagas Media'), ('Republika Penerbit'), ('Gunung Agung'),
+    ('Djambatan'), ('Yayasan Obor Indonesia'), ('LKiS'), ('Tiga Serangkai'),
+    ('Yudhistira'), ('Grafindo Media Pratama'), ('Ar-Ruzz Media')
+)
+INSERT INTO agent_roles (agent_id, role, source_note)
+SELECT a.id, 'publisher', 'Seed awal: organisasi penerbit/percetakan.'
+FROM agents a
+JOIN seed_publishing_agents s ON s.authorized_name = a.authorized_name
+ON CONFLICT (agent_id, role) DO NOTHING;
+
+WITH seed_printing_agents(authorized_name) AS (
+  VALUES
+    ('Landsdrukkerij'), ('G. Kolff & Co'), ('G.C.T. van Dorp & Co'),
+    ('A.C. Nix & Co'), ('Java-Bode'), ('Kanisius'), ('Tjoei Toei Yang'),
+    ('Sie Dhian Ho'), ('Hoa Siang In Kiok'), ('Sin Bin'), ('Panorama'),
+    ('Moestika'), ('Sinar Deli')
+)
+INSERT INTO agent_roles (agent_id, role, source_note)
+SELECT a.id, 'printer', 'Seed awal: organisasi juga dikenal sebagai percetakan.'
+FROM agents a
+JOIN seed_printing_agents s ON s.authorized_name = a.authorized_name
+ON CONFLICT (agent_id, role) DO NOTHING;
+
 -- -------------------------------------------------------------
 -- 3. Referensi: tempat umum (gazetteer awal)
 -- -------------------------------------------------------------
+-- Negara
+INSERT INTO places (preferred_name, alternate_names, place_type, country) VALUES
+  ('Indonesia', 'Hindia Belanda; Dutch East Indies; Nederlandsch-Indie', 'country', 'Indonesia')
+ON CONFLICT (preferred_name, place_type) DO NOTHING;
+
 -- Kota Indonesia (dengan ejaan lama / nama kolonial)
 INSERT INTO places (preferred_name, alternate_names, place_type, country) VALUES
   ('Jakarta',      'Batavia; Betawi; Djakarta',        'city', 'Indonesia'),
@@ -218,6 +330,25 @@ INSERT INTO places (preferred_name, alternate_names, place_type, country) VALUES
   ('Pontianak',    NULL,                               'city', 'Indonesia'),
   ('Banjarmasin',  'Bandjarmasin',                     'city', 'Indonesia'),
   ('Kupang',       NULL,                               'city', 'Indonesia')
+ON CONFLICT (preferred_name, place_type) DO NOTHING;
+
+-- Kota/kawasan tambahan yang sering muncul sebagai kantor penerbit
+INSERT INTO places (preferred_name, alternate_names, place_type, country) VALUES
+  ('Jakarta Pusat',   'Central Jakarta',       'city',   'Indonesia'),
+  ('Jakarta Selatan', 'South Jakarta',         'city',   'Indonesia'),
+  ('Jakarta Timur',   'East Jakarta',          'city',   'Indonesia'),
+  ('Bantul',          NULL,                    'city',   'Indonesia'),
+  ('Banyumas',        NULL,                    'city',   'Indonesia'),
+  ('Ende',            NULL,                    'city',   'Indonesia'),
+  ('Kebumen',         NULL,                    'city',   'Indonesia'),
+  ('Pontianak Kota',  NULL,                    'city',   'Indonesia'),
+  ('Sidoarjo',        NULL,                    'city',   'Indonesia'),
+  ('Slawi',           NULL,                    'city',   'Indonesia'),
+  ('Sumenep',         NULL,                    'city',   'Indonesia'),
+  ('Tasikmalaya',     NULL,                    'city',   'Indonesia'),
+  ('Ubud',            NULL,                    'city',   'Indonesia'),
+  ('Karet',           'Karet, Jakarta',        'region', 'Indonesia'),
+  ('Palmerah',        'Palmerah, Jakarta',     'region', 'Indonesia')
 ON CONFLICT (preferred_name, place_type) DO NOTHING;
 
 -- Pulau / wilayah

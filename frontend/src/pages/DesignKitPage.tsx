@@ -21,6 +21,7 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recha
 import { Modal } from "../components/ui/Modal";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Carousel } from "../components/ui/Carousel";
+import { TablePagination, usePagination } from "../components/ui/TablePagination";
 
 const acquisitionSchema = z.object({
   inventoryCode: z.string().min(1, "Wajib diisi"),
@@ -35,15 +36,15 @@ interface GradeRow {
 }
 
 const gradeData: GradeRow[] = [
-  { grade: "core", count: 12 },
-  { grade: "important", count: 8 },
-  { grade: "supporting", count: 20 },
-  { grade: "reading", count: 15 },
-  { grade: "duplicate", count: 5 },
+  { grade: "Inti", count: 12 },
+  { grade: "Penting", count: 8 },
+  { grade: "Pendukung", count: 20 },
+  { grade: "Bacaan", count: 15 },
+  { grade: "Duplikat", count: 5 },
 ];
 
 const gradeColumns: ColumnDef<GradeRow>[] = [
-  { accessorKey: "grade", header: "Grade" },
+  { accessorKey: "grade", header: "Kelas" },
   { accessorKey: "count", header: "Jumlah" },
 ];
 
@@ -73,17 +74,14 @@ export default function DesignKitPage() {
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
+  const tableRows = table.getRowModel().rows;
+  const pagination = usePagination(tableRows, {
+    initialPageSize: 3,
+    resetKey: JSON.stringify(sorting),
+  });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-10 p-8">
-      <div>
-        <h1 className="text-4xl">Design Kit</h1>
-        <p className="text-[var(--color-ink-soft)]">
-          Halaman uji seluruh library: font, ikon, animasi, modal, notifikasi, carousel,
-          QR, tanggal, form, upload, tabel, dan grafik.
-        </p>
-      </div>
-
+    <div className="space-y-10">
       <section className="space-y-2">
         <h2 className="text-lg">Tipografi</h2>
         <p className="font-[family-name:var(--font-heading)] text-2xl">
@@ -95,14 +93,14 @@ export default function DesignKitPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Ikon (lucide-react)</h2>
+        <h2 className="text-lg">Ikon</h2>
         <div className="flex gap-4 text-[var(--color-accent)]">
           <BookMarked /> <Sparkles /> <Trash2 />
         </div>
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Animasi (motion)</h2>
+        <h2 className="text-lg">Animasi</h2>
         <motion.div
           className="h-16 w-16 rounded-lg bg-[var(--color-accent)]"
           animate={{ rotate: [0, 8, -8, 0] }}
@@ -111,7 +109,7 @@ export default function DesignKitPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Modal & Konfirmasi (Radix + motion)</h2>
+        <h2 className="text-lg">Modal & Konfirmasi</h2>
         <div className="flex gap-3">
           <button
             onClick={() => setModalOpen(true)}
@@ -129,17 +127,17 @@ export default function DesignKitPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Notifikasi (sonner)</h2>
+        <h2 className="text-lg">Notifikasi</h2>
         <button
           onClick={() => toast.success("Eksemplar berhasil disimpan")}
           className="rounded-md border border-[var(--color-border)] px-4 py-2 text-sm hover:bg-[var(--color-parchment-dim)]"
         >
-          Tampilkan Toast
+          Tampilkan Notifikasi
         </button>
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Carousel (embla)</h2>
+        <h2 className="text-lg">Karusel</h2>
         <Carousel>
           {["Sejarah", "Sastra", "Peta", "Agama", "Biografi"].map((cat) => (
             <div
@@ -153,7 +151,7 @@ export default function DesignKitPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">QR Code (qrcode.react)</h2>
+        <h2 className="text-lg">Kode QR</h2>
         <p className="text-sm text-[var(--color-ink-soft)]">
           Contoh QR untuk eksemplar BK-IND-000001, menunjuk ke ID internal permanen.
         </p>
@@ -161,7 +159,7 @@ export default function DesignKitPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Date Picker (react-day-picker)</h2>
+        <h2 className="text-lg">Pemilih Tanggal</h2>
         <DayPicker mode="single" selected={date} onSelect={setDate} />
         <p className="text-sm text-[var(--color-ink-soft)]">
           Terpilih: {date ? date.toLocaleDateString("id-ID") : "belum ada"}
@@ -169,7 +167,7 @@ export default function DesignKitPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Form (react-hook-form + zod)</h2>
+        <h2 className="text-lg">Formulir</h2>
         <form
           onSubmit={handleSubmit((data) => toast.success(`Tersimpan: ${data.inventoryCode}`))}
           className="space-y-3"
@@ -206,7 +204,7 @@ export default function DesignKitPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Upload Foto (react-dropzone)</h2>
+        <h2 className="text-lg">Unggah Foto</h2>
         <div
           {...getRootProps()}
           className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 text-sm ${
@@ -227,40 +225,51 @@ export default function DesignKitPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Tabel (TanStack Table)</h2>
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id}>
-                {hg.headers.map((h) => (
-                  <th
-                    key={h.id}
-                    onClick={h.column.getToggleSortingHandler()}
-                    className="cursor-pointer border-b border-[var(--color-border)] p-2 text-left"
-                  >
-                    {flexRender(h.column.columnDef.header, h.getContext())}
-                    {{ asc: " ↑", desc: " ↓" }[h.column.getIsSorted() as string] ?? ""}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.map((row) => (
-              <tr key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="border-b border-[var(--color-border)] p-2">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h2 className="text-lg">Tabel</h2>
+        <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-white">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-[var(--color-surface)]">
+              {table.getHeaderGroups().map((hg) => (
+                <tr key={hg.id}>
+                  {hg.headers.map((h) => (
+                    <th
+                      key={h.id}
+                      onClick={h.column.getToggleSortingHandler()}
+                      className="cursor-pointer border-b border-[var(--color-border)] p-3 text-left font-medium text-[var(--color-ink-soft)]"
+                    >
+                      {flexRender(h.column.columnDef.header, h.getContext())}
+                      {{ asc: " ↑", desc: " ↓" }[h.column.getIsSorted() as string] ?? ""}
+                    </th>
+                  ))}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {pagination.pageItems.map((row) => (
+                <tr key={row.id} className="hover:bg-[var(--color-surface)]">
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id} className="border-b border-[var(--color-border)] p-3">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <TablePagination
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            pageSizeOptions={[3, 5, 10]}
+            totalItems={pagination.totalItems}
+            totalPages={pagination.totalPages}
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+          />
+        </div>
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg">Grafik (Recharts)</h2>
+        <h2 className="text-lg">Grafik</h2>
         <div style={{ width: "100%", height: 200 }}>
           <ResponsiveContainer>
             <BarChart data={gradeData}>

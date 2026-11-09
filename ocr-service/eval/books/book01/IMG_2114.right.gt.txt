@@ -1,0 +1,13 @@
+[PARAGRAF] "Benar. Aku mengambil dan memilih. Untuk Hercule Poirot, sekarang ini hanyalah kasus kriminal yang istimewa."
+[PARAGRAF] "Apakah banyak kasus istimewa akhir-akhir ini?"
+[PARAGRAF] "Pas mal. Lumayan. Belum lama ini aku nyaris celaka."
+[PARAGRAF] "Karena kegagalan?"
+[PARAGRAF] "Bukan, bukan." Poirot kelihatan kaget. "Tapi aku—aku, Hercule Poirot, hampir saja mampus."
+[PARAGRAF] Aku bersiul.
+[PARAGRAF] "Seorang pembunuh kelas kakap!"
+[PARAGRAF] "Tidak bisa dikatakan kakap karena keteledorannya," ujar Poirot. "Persis begitu—teledor. Tapi tak perlu diperbincangkan. Kau tahu, Hastings, dalam banyak hal aku menganggap kau maskotku."
+[PARAGRAF] "Oh ya?" kataku. "Dalam hal apa?"
+[PARAGRAF] Poirot tidak langsung menjawab pertanyaanku. Dia melanjutkan, "Begitu mendengar kau akan datang, aku berkata pada diriku sendiri: Sesuatu akan terjadi. Seperti di masa lalu, kita akan berburu bersama, kita berdua. Tapi bila demikian, masalahnya harus istimewa, bukan yang biasa-biasa saja." Dia menggerakkan tangannya dengan bergairah. "Sesuatu yang recherce—halus—lembut..." Dia mengucapkan kata terakhir yang tidak dapat dijelaskan itu dengan gaya yang menegaskan artinya.
+[PARAGRAF] "Astaga, Poirot," ujarku. "Siapa pun akan mengira kau sedang memesan makan malam di Ritz."
+[PARAGRAF] "Padahal orang tidak mungkin memesan suatu kejahatan. Ya—begitulah." Dia mendesah. "Tapi aku per-
+[HALAMAN] 13
